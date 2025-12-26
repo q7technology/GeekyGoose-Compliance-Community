@@ -2,7 +2,9 @@ import os
 import uuid
 import json
 import requests
+import logging
 from typing import List, Optional
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -11,11 +13,32 @@ from models import Document, Org, User, Framework, Control, Requirement, Evidenc
 from storage import storage
 from worker_tasks import extract_document_text, process_scan
 from pydantic import BaseModel
+from init_db import initialize_database
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Starting GeekyGoose Compliance API...")
+    
+    # Initialize database on startup
+    if not initialize_database():
+        logger.error("Database initialization failed!")
+        raise RuntimeError("Database initialization failed")
+    
+    logger.info("GeekyGoose Compliance API startup complete")
+    yield
+    # Shutdown
+    logger.info("GeekyGoose Compliance API shutting down...")
 
 app = FastAPI(
     title="GeekyGoose Compliance API",
     description="Compliance automation platform for SMB + internal IT teams",
-    version="0.1.0"
+    version="0.1.0",
+    lifespan=lifespan
 )
 
 # CORS middleware
