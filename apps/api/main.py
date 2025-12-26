@@ -25,8 +25,8 @@ def _safe_json_loads(json_str: Optional[str], default=None):
         return default
     try:
         return json.loads(json_str)
-    except (json.JSONDecodeError, TypeError):
-        logger.warning(f"Failed to parse JSON: {json_str[:50]}...")
+    except (json.JSONDecodeError, TypeError) as e:
+        logger.warning(f"Invalid JSON data in database - returning default. Content: {json_str[:100]}... Error: {e}")
         return default
 
 @asynccontextmanager
