@@ -289,16 +289,12 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Admin Guide**: [docs/admin-guide.md](docs/admin-guide.md)
 - **Developer Guide**: [docs/developer-guide.md](docs/developer-guide.md)
 
-### **Community**
-- **Issues**: [GitHub Issues](https://github.com/yourusername/geekygoose-compliance/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/geekygoose-compliance/discussions)
-- **Discord**: [Community Server](https://discord.gg/geekygoose)
 
 ### **Commercial Support**
-- **Enterprise Licenses**: Available for commercial use
+- **Enterprise Licenses**: Coming soon
 - **Custom Frameworks**: Add your industry-specific requirements
 - **Professional Services**: Implementation and training available
-- **SLA Support**: 24/7 support with guaranteed response times
+- **SLA Support**: As-IS
 
 ---
 
