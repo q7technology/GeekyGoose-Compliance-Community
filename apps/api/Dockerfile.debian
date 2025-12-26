@@ -6,21 +6,13 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
-    make \
     libpq-dev \
     tesseract-ocr \
     poppler-utils \
-    libfreetype6-dev \
-    libjpeg-dev \
-    libopenjp2-7-dev \
-    zlib1g-dev \
     libffi-dev \
-    libmupdf-dev \
-    pkg-config \
+    libjpeg-dev \
+    libfreetype6-dev \
     && rm -rf /var/lib/apt/lists/*
-
-# Upgrade pip first
-RUN pip install --upgrade pip
 
 # Copy requirements first for better caching
 COPY requirements.txt .
