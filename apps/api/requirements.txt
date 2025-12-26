@@ -6,8 +6,8 @@ alembic==1.13.1
 redis==5.0.1
 celery==5.3.4
 boto3==1.34.0
-python-multipart==0.0.6
-python-jose[cryptography]==3.3.0
+python-multipart==0.0.7
+python-jose==3.4.0
 passlib[bcrypt]==1.7.4
 pydantic==2.5.0
 pydantic-settings==2.1.0
@@ -18,4 +18,8 @@ python-docx==1.1.0
 pillow==10.1.0
 pytesseract==0.3.10
 pgvector==0.2.4
-requests==2.31.0
+requests==2.32.2
+h11>=0.16.0 # not directly required, pinned by Snyk to avoid a vulnerability
+urllib3>=1.26.19 # not directly required, pinned by Snyk to avoid a vulnerability
+anyio>=4.4.0 # not directly required, pinned by Snyk to avoid a vulnerability
+zipp>=3.19.1 # not directly required, pinned by Snyk to avoid a vulnerability
