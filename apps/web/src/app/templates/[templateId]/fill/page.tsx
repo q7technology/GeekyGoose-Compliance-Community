@@ -64,6 +64,7 @@ export default function FillTemplatePage() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [aiValidationResults, setAiValidationResults] = useState<Record<string, AIValidationResult>>({});
   const [validatingEvidence, setValidatingEvidence] = useState<Set<string>>(new Set());
+  const [runningFullValidation, setRunningFullValidation] = useState(false);
 
   useEffect(() => {
     if (templateId) {
@@ -173,6 +174,87 @@ export default function FillTemplatePage() {
     // Start AI validation if file is uploaded and template supports it
     if (file && template?.ai_validation_enabled) {
       await validateEvidenceWithAI(requirementCode, file);
+    }
+  };
+
+  // Helper function to check if all required evidence has passed validation
+  const hasAllValidationPassed = (): boolean => {
+    if (!template) return false;
+    
+    const requiredEvidence = template.evidence_requirements.filter(req => req.required);
+    
+    for (const req of requiredEvidence) {
+      // Check if evidence is uploaded
+      if (!evidenceUploads[req.requirement_code]?.file) {
+        return false;
+      }
+      
+      // Check if AI validation exists and passed
+      const validation = aiValidationResults[req.requirement_code];
+      if (!validation || validation.status === 'failed') {
+        return false;
+      }
+    }
+    
+    return true;
+  };
+
+  // Function to calculate compliance score based on validation results
+  const calculateComplianceScore = (): { score: number; passed: number; total: number; warnings: number; failed: number } => {
+    if (!template) return { score: 0, passed: 0, total: 0, warnings: 0, failed: 0 };
+    
+    const requiredEvidence = template.evidence_requirements.filter(req => req.required);
+    let passed = 0;
+    let warnings = 0;
+    let failed = 0;
+    
+    for (const req of requiredEvidence) {
+      const validation = aiValidationResults[req.requirement_code];
+      if (validation) {
+        if (validation.status === 'passed') {
+          passed++;
+        } else if (validation.status === 'warning') {
+          warnings++;
+        } else if (validation.status === 'failed') {
+          failed++;
+        }
+      } else if (evidenceUploads[req.requirement_code]?.file) {
+        // Evidence uploaded but not validated yet
+        failed++; // Count as failed until validated
+      } else {
+        // No evidence uploaded
+        failed++;
+      }
+    }
+    
+    const total = requiredEvidence.length;
+    const score = total > 0 ? Math.round(((passed + warnings * 0.5) / total) * 100) : 0;
+    
+    return { score, passed, total, warnings, failed };
+  };
+
+  // Function to run AI validation on all uploaded evidence
+  const runFullAIValidation = async () => {
+    if (!template) return;
+    
+    setRunningFullValidation(true);
+    
+    try {
+      const requiredEvidence = template.evidence_requirements.filter(req => req.required);
+      const validationPromises = [];
+      
+      for (const req of requiredEvidence) {
+        const upload = evidenceUploads[req.requirement_code];
+        if (upload?.file) {
+          validationPromises.push(validateEvidenceWithAI(req.requirement_code, upload.file));
+        }
+      }
+      
+      await Promise.all(validationPromises);
+    } catch (error) {
+      console.error('Error running full AI validation:', error);
+    } finally {
+      setRunningFullValidation(false);
     }
   };
 
@@ -376,6 +458,15 @@ export default function FillTemplatePage() {
   const renderCompanyField = (field: Template['company_fields'][0]) => {
     const value = companyData[field.field_name] || '';
     const error = errors[field.field_name];
+    const isFilled = value && value.toString().trim().length > 0;
+    const isRequired = field.required;
+    
+    // Determine border color based on state
+    const getBorderClass = () => {
+      if (error) return 'border-red-300 focus:border-red-500 focus:ring-red-500';
+      if (isRequired && isFilled) return 'border-green-300 focus:border-green-500 focus:ring-green-500';
+      return 'border-gray-300 focus:border-blue-500 focus:ring-blue-500';
+    };
     
     switch (field.field_type) {
       case 'textarea':
@@ -384,9 +475,7 @@ export default function FillTemplatePage() {
             value={value}
             onChange={(e) => handleCompanyDataChange(field.field_name, e.target.value)}
             rows={4}
-            className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${
-              error ? 'border-red-300' : 'border-gray-300'
-            }`}
+            className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none ${getBorderClass()}`}
             placeholder={field.placeholder}
           />
         );
@@ -396,9 +485,7 @@ export default function FillTemplatePage() {
           <select
             value={value}
             onChange={(e) => handleCompanyDataChange(field.field_name, e.target.value)}
-            className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${
-              error ? 'border-red-300' : 'border-gray-300'
-            }`}
+            className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none ${getBorderClass()}`}
           >
             <option value="">{field.placeholder || `Select ${field.field_name.replace('_', ' ')}`}</option>
             {field.options?.map(option => (
@@ -412,9 +499,7 @@ export default function FillTemplatePage() {
           <input
             type="file"
             onChange={(e) => handleCompanyDataChange(field.field_name, e.target.files?.[0] || null)}
-            className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${
-              error ? 'border-red-300' : 'border-gray-300'
-            }`}
+            className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none ${getBorderClass()}`}
           />
         );
       
@@ -424,9 +509,7 @@ export default function FillTemplatePage() {
             type="text"
             value={value}
             onChange={(e) => handleCompanyDataChange(field.field_name, e.target.value)}
-            className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 ${
-              error ? 'border-red-300' : 'border-gray-300'
-            }`}
+            className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none ${getBorderClass()}`}
             placeholder={field.placeholder}
           />
         );
@@ -482,6 +565,142 @@ export default function FillTemplatePage() {
           </div>
         </div>
 
+        {/* Compliance Score Section */}
+        {template && (
+          <div className="bg-white rounded-lg border border-gray-200 shadow-sm mb-8">
+            <div className="px-6 py-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">AI Validation Status</h2>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Track evidence validation progress and compliance score
+                  </p>
+                </div>
+                <div className="text-right">
+                  {(() => {
+                    const { score, passed, total, warnings, failed } = calculateComplianceScore();
+                    return (
+                      <div>
+                        <div className={`text-2xl font-bold ${
+                          score >= 80 ? 'text-green-600' : 
+                          score >= 60 ? 'text-yellow-600' : 'text-red-600'
+                        }`}>
+                          {score}%
+                        </div>
+                        <div className="text-xs text-gray-500">
+                          {passed} passed • {warnings} warnings • {failed} failed
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+              
+              <div className="mt-4 flex items-center justify-between">
+                <div className="flex items-center space-x-4">
+                  <button
+                    onClick={runFullAIValidation}
+                    disabled={runningFullValidation || Object.keys(evidenceUploads).filter(key => evidenceUploads[key]?.file).length === 0}
+                    className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white ${
+                      runningFullValidation || Object.keys(evidenceUploads).filter(key => evidenceUploads[key]?.file).length === 0
+                        ? 'bg-gray-400 cursor-not-allowed'
+                        : 'bg-blue-600 hover:bg-blue-700'
+                    }`}
+                  >
+                    {runningFullValidation ? (
+                      <>
+                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Running AI Validation...
+                      </>
+                    ) : (
+                      <>
+                        🤖 Run AI Validation
+                      </>
+                    )}
+                  </button>
+                  
+                  {Object.keys(evidenceUploads).filter(key => evidenceUploads[key]?.file).length === 0 && (
+                    <span className="text-sm text-gray-500">Upload evidence first to run validation</span>
+                  )}
+                </div>
+                
+                {/* Validation Progress Indicator */}
+                <div className="flex items-center space-x-2 text-sm">
+                  {validatingEvidence.size > 0 && (
+                    <div className="flex items-center text-blue-600">
+                      <svg className="animate-spin h-4 w-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      {validatingEvidence.size} file{validatingEvidence.size > 1 ? 's' : ''} validating...
+                    </div>
+                  )}
+                  
+                  {(() => {
+                    const uploadedFiles = Object.keys(evidenceUploads).filter(key => evidenceUploads[key]?.file);
+                    const validatedFiles = Object.keys(aiValidationResults);
+                    const pendingValidation = uploadedFiles.length - validatedFiles.length - validatingEvidence.size;
+                    
+                    if (uploadedFiles.length > 0 && pendingValidation > 0 && validatingEvidence.size === 0) {
+                      return (
+                        <span className="text-gray-500">
+                          {pendingValidation} file{pendingValidation > 1 ? 's' : ''} awaiting validation
+                        </span>
+                      );
+                    }
+                    
+                    return null;
+                  })()}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* AI Validation Running Status Banner */}
+        {(validatingEvidence.size > 0 || runningFullValidation) && (
+          <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-8">
+            <div className="flex">
+              <div className="flex-shrink-0">
+                <svg className="animate-spin h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </div>
+              <div className="ml-3">
+                <h3 className="text-sm font-medium text-blue-800">
+                  🤖 AI Validation in Progress
+                </h3>
+                <div className="mt-2 text-sm text-blue-700">
+                  {runningFullValidation ? (
+                    <p>Running comprehensive AI validation on all uploaded evidence files. This may take a moment...</p>
+                  ) : (
+                    <p>
+                      Validating {validatingEvidence.size} file{validatingEvidence.size > 1 ? 's' : ''} with AI. 
+                      Please wait while we analyze your evidence for compliance requirements.
+                    </p>
+                  )}
+                </div>
+                <div className="mt-3">
+                  <div className="flex -space-x-1 overflow-hidden">
+                    {Array.from(validatingEvidence).map((requirementCode) => (
+                      <div
+                        key={requirementCode}
+                        className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 ring-2 ring-white"
+                      >
+                        {requirementCode}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="space-y-8">
           {/* Company Information Section */}
           <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
@@ -495,9 +714,21 @@ export default function FillTemplatePage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {template.company_fields.map((field) => (
                   <div key={field.field_name} className={field.field_type === 'textarea' ? 'md:col-span-2' : ''}>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className={`block text-sm font-medium mb-2 ${
+                      field.required && companyData[field.field_name] 
+                        ? 'text-green-700' 
+                        : 'text-gray-700'
+                    }`}>
                       {field.field_name.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                      {field.required && <span className="text-red-500 ml-1">*</span>}
+                      {field.required && (
+                        <span className={`ml-1 ${
+                          companyData[field.field_name] 
+                            ? 'text-green-500' 
+                            : 'text-red-500'
+                        }`}>
+                          {companyData[field.field_name] ? '✓' : '*'}
+                        </span>
+                      )}
                     </label>
                     {renderCompanyField(field)}
                     {errors[field.field_name] && (
@@ -520,15 +751,68 @@ export default function FillTemplatePage() {
             <div className="p-6">
               <div className="space-y-6">
                 {template.evidence_requirements.map((req) => (
-                  <div key={req.requirement_code} className="border border-gray-200 rounded-lg p-4">
+                  <div key={req.requirement_code} className={`border rounded-lg p-4 ${
+                    req.required && evidenceUploads[req.requirement_code]?.file && aiValidationResults[req.requirement_code]?.status === 'passed'
+                      ? 'border-green-300 bg-green-50'
+                      : req.required && evidenceUploads[req.requirement_code]?.file
+                      ? 'border-blue-300 bg-blue-50'
+                      : 'border-gray-200'
+                  }`}>
                     <div className="flex items-start justify-between mb-3">
                       <div>
-                        <h3 className="font-medium text-gray-900 flex items-center">
+                        <h3 className={`font-medium flex items-center ${
+                          req.required && evidenceUploads[req.requirement_code]?.file
+                            ? 'text-green-900'
+                            : 'text-gray-900'
+                        }`}>
                           {req.requirement_code}
-                          {req.required && <span className="text-red-500 ml-1">*</span>}
-                          <span className="ml-2 bg-gray-100 text-gray-700 text-xs px-2 py-1 rounded-full">
+                          {req.required && (
+                            <span className={`ml-1 ${
+                              evidenceUploads[req.requirement_code]?.file
+                                ? 'text-green-500'
+                                : 'text-red-500'
+                            }`}>
+                              {evidenceUploads[req.requirement_code]?.file ? '✓' : '*'}
+                            </span>
+                          )}
+                          <span className={`ml-2 text-xs px-2 py-1 rounded-full ${
+                            req.required && evidenceUploads[req.requirement_code]?.file
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-gray-100 text-gray-700'
+                          }`}>
                             {req.evidence_type}
                           </span>
+                          
+                          {/* AI Validation Status Indicator */}
+                          {evidenceUploads[req.requirement_code]?.file && (
+                            <span className="ml-2">
+                              {validatingEvidence.has(req.requirement_code) ? (
+                                <div className="flex items-center">
+                                  <svg className="animate-spin h-4 w-4 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                  </svg>
+                                  <span className="ml-1 text-xs text-blue-600 font-medium">AI Validating...</span>
+                                </div>
+                              ) : aiValidationResults[req.requirement_code] ? (
+                                <div className={`flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                                  aiValidationResults[req.requirement_code].status === 'passed' 
+                                    ? 'bg-green-100 text-green-800'
+                                    : aiValidationResults[req.requirement_code].status === 'warning'
+                                    ? 'bg-yellow-100 text-yellow-800'
+                                    : 'bg-red-100 text-red-800'
+                                }`}>
+                                  {aiValidationResults[req.requirement_code].status === 'passed' && '🤖 ✅ AI Validated'}
+                                  {aiValidationResults[req.requirement_code].status === 'warning' && '🤖 ⚠️ Needs Review'}
+                                  {aiValidationResults[req.requirement_code].status === 'failed' && '🤖 ❌ Validation Failed'}
+                                </div>
+                              ) : (
+                                <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
+                                  🤖 Awaiting AI Validation
+                                </span>
+                              )}
+                            </span>
+                          )}
                         </h3>
                         <p className="text-sm text-gray-600 mt-1">{req.description}</p>
                       </div>
@@ -640,8 +924,28 @@ export default function FillTemplatePage() {
                 <div>
                   <h3 className="text-lg font-medium text-gray-900">Review and Submit</h3>
                   <p className="text-sm text-gray-600 mt-1">
-                    Please review your information and evidence before submitting.
+                    {hasAllValidationPassed() 
+                      ? "All validation requirements met. Ready to download or submit."
+                      : "AI validation must pass for all required evidence before downloading or submitting."
+                    }
                   </p>
+                  {!hasAllValidationPassed() && (
+                    <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                      <div className="flex">
+                        <div className="flex-shrink-0">
+                          <svg className="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                          </svg>
+                        </div>
+                        <div className="ml-3">
+                          <h4 className="text-sm font-medium text-yellow-800">Validation Required</h4>
+                          <p className="text-sm text-yellow-700 mt-1">
+                            Upload all required evidence and run AI validation to unlock download and submission features.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="flex space-x-3">
                   <Link
@@ -653,19 +957,26 @@ export default function FillTemplatePage() {
                   {template && companyData.company_name && (
                     <button
                       onClick={() => downloadTemplateAsWord(template, companyData.company_name, companyData)}
-                      className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-purple-600 hover:bg-purple-700"
+                      disabled={!hasAllValidationPassed()}
+                      className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white ${
+                        hasAllValidationPassed()
+                          ? 'bg-purple-600 hover:bg-purple-700'
+                          : 'bg-gray-400 cursor-not-allowed'
+                      }`}
+                      title={hasAllValidationPassed() ? 'Download completed policy document' : 'AI validation required before download'}
                     >
                       📄 Download Policy Word
                     </button>
                   )}
                   <button
                     onClick={submitTemplate}
-                    disabled={submitting}
+                    disabled={submitting || !hasAllValidationPassed()}
                     className={`inline-flex items-center px-6 py-2 border border-transparent text-sm font-medium rounded-md text-white ${
-                      submitting
+                      submitting || !hasAllValidationPassed()
                         ? 'bg-gray-400 cursor-not-allowed'
                         : 'bg-blue-600 hover:bg-blue-700'
                     }`}
+                    title={hasAllValidationPassed() ? 'Submit completed template' : 'AI validation required before submission'}
                   >
                     {submitting ? (
                       <>

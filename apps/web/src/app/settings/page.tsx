@@ -7,6 +7,7 @@ interface AISettings {
   provider: 'openai' | 'ollama';
   openai_api_key?: string;
   openai_model?: string;
+  openai_endpoint?: string;
   ollama_endpoint?: string;
   ollama_model?: string;
 }
@@ -23,7 +24,9 @@ export default function SettingsPage() {
   const [testingConnection, setTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [ollamaModels, setOllamaModels] = useState<any[]>([]);
+  const [openaiModels, setOpenaiModels] = useState<any[]>([]);
   const [fetchingModels, setFetchingModels] = useState(false);
+  const [fetchingOpenaiModels, setFetchingOpenaiModels] = useState(false);
 
   useEffect(() => {
     fetchSettings();
@@ -35,6 +38,24 @@ export default function SettingsPage() {
       fetchOllamaModels();
     }
   }, [settings.provider]);
+
+  // Auto-fetch OpenAI models when provider changes to OpenAI and has custom endpoint
+  useEffect(() => {
+    if (settings.provider === 'openai' && settings.openai_endpoint) {
+      fetchOpenaiModels();
+    }
+  }, [settings.provider]);
+
+  // Auto-fetch OpenAI models when endpoint or API key changes (with debounce)
+  useEffect(() => {
+    if (settings.provider === 'openai' && settings.openai_endpoint) {
+      const timer = setTimeout(() => {
+        fetchOpenaiModels();
+      }, 1000); // 1 second debounce
+      
+      return () => clearTimeout(timer);
+    }
+  }, [settings.openai_endpoint, settings.openai_api_key]);
 
   // Auto-fetch models when endpoint changes (with debounce)
   useEffect(() => {
@@ -49,7 +70,7 @@ export default function SettingsPage() {
 
   const fetchSettings = async () => {
     try {
-      const response = await fetch('http://localhost:8000/settings/ai');
+      const response = await fetch('/api/settings/ai');
       if (response.ok) {
         const data = await response.json();
         setSettings({ ...settings, ...data });
@@ -61,11 +82,52 @@ export default function SettingsPage() {
     }
   };
 
+  const fetchOpenaiModels = async (endpoint?: string, apiKey?: string) => {
+    setFetchingOpenaiModels(true);
+    try {
+      const targetEndpoint = endpoint || settings.openai_endpoint || '';
+      const targetApiKey = apiKey || settings.openai_api_key || '';
+      
+      // Only require API key if using default OpenAI endpoint
+      if (!targetEndpoint && (!targetApiKey || targetApiKey === '***')) {
+        setTestResult('❌ API key required for default OpenAI endpoint');
+        setOpenaiModels([]);
+        return;
+      }
+
+      const queryParams = new URLSearchParams();
+      if (targetEndpoint) {
+        queryParams.append('endpoint', targetEndpoint);
+      }
+      if (targetApiKey && targetApiKey !== '***') {
+        queryParams.append('api_key', targetApiKey);
+      }
+
+      const response = await fetch(`/api/settings/openai/models?${queryParams}`);
+      
+      if (response.ok) {
+        const data = await response.json();
+        setOpenaiModels(data.models || []);
+        setTestResult(`✅ Found ${data.total_models} models from ${data.endpoint}`);
+      } else {
+        const error = await response.json();
+        setOpenaiModels([]);
+        setTestResult(`❌ Failed to fetch models: ${error.detail}`);
+      }
+    } catch (error) {
+      setOpenaiModels([]);
+      setTestResult(`❌ Error fetching models: ${error}`);
+    } finally {
+      setFetchingOpenaiModels(false);
+      setTimeout(() => setTestResult(null), 5000);
+    }
+  };
+
   const fetchOllamaModels = async (endpoint?: string) => {
     setFetchingModels(true);
     try {
       const targetEndpoint = endpoint || settings.ollama_endpoint || 'http://172.16.0.11:11434';
-      const response = await fetch(`http://localhost:8000/settings/ollama/models?endpoint=${encodeURIComponent(targetEndpoint)}`);
+      const response = await fetch(`/api/settings/ollama/models?endpoint=${encodeURIComponent(targetEndpoint)}`);
       
       if (response.ok) {
         const data = await response.json();
@@ -88,7 +150,7 @@ export default function SettingsPage() {
   const saveSettings = async () => {
     setSaving(true);
     try {
-      const response = await fetch('http://localhost:8000/settings/ai', {
+      const response = await fetch('/api/settings/ai', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -115,7 +177,7 @@ export default function SettingsPage() {
     setTestResult(null);
     
     try {
-      const response = await fetch('http://localhost:8000/settings/ai/test', {
+      const response = await fetch('/api/settings/ai/test', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -217,36 +279,101 @@ export default function SettingsPage() {
                 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    API Key
+                    API Key {settings.openai_endpoint && <span className="text-gray-500 text-xs font-normal">(optional for custom endpoints)</span>}
                   </label>
                   <input
                     type="password"
                     value={settings.openai_api_key || ''}
                     onChange={(e) => setSettings({ ...settings, openai_api_key: e.target.value })}
-                    placeholder="sk-..."
+                    placeholder={settings.openai_endpoint ? "Optional for custom endpoints" : "sk-..."}
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-700">platform.openai.com</a>
+                    {settings.openai_endpoint ? (
+                      "API key is optional when using custom endpoints that don't require authentication"
+                    ) : (
+                      <>Get your API key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-700">platform.openai.com</a></>
+                    )}
                   </p>
                 </div>
 
                 <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="block text-sm font-medium text-gray-700">
+                      Model
+                    </label>
+                    {settings.openai_endpoint && (
+                      <button
+                        type="button"
+                        onClick={() => fetchOpenaiModels()}
+                        disabled={fetchingOpenaiModels}
+                        className={`text-xs px-2 py-1 rounded border ${
+                          fetchingOpenaiModels
+                            ? 'text-gray-400 border-gray-200 cursor-not-allowed'
+                            : 'text-blue-600 border-blue-200 hover:bg-blue-50'
+                        }`}
+                      >
+                        {fetchingOpenaiModels ? 'Fetching...' : 'Refresh Models'}
+                      </button>
+                    )}
+                  </div>
+                  
+                  {settings.openai_endpoint && openaiModels.length > 0 ? (
+                    <select
+                      value={settings.openai_model || ''}
+                      onChange={(e) => setSettings({ ...settings, openai_model: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="">Select a model...</option>
+                      {openaiModels.map((model, index) => (
+                        <option key={index} value={model.id}>
+                          {model.display_name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <select
+                      value={settings.openai_model || 'gpt-4o-mini'}
+                      onChange={(e) => setSettings({ ...settings, openai_model: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="gpt-4o-mini">GPT-4o Mini (Recommended)</option>
+                      <option value="gpt-4o">GPT-4o</option>
+                      <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                      <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                    </select>
+                  )}
+                  
+                  <div className="mt-2 space-y-1">
+                    {!settings.openai_endpoint ? (
+                      <p className="text-xs text-gray-500">
+                        GPT-4o Mini offers the best balance of cost and quality for compliance analysis
+                      </p>
+                    ) : openaiModels.length > 0 ? (
+                      <p className="text-xs text-green-600">
+                        ✅ {openaiModels.length} models found from custom endpoint
+                      </p>
+                    ) : (
+                      <p className="text-xs text-gray-500">
+                        Enter custom endpoint above{settings.openai_endpoint ? '' : ' and API key'}, then click "Refresh Models" to load available models
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Model
+                    Custom Endpoint (Optional)
                   </label>
-                  <select
-                    value={settings.openai_model || 'gpt-4o-mini'}
-                    onChange={(e) => setSettings({ ...settings, openai_model: e.target.value })}
+                  <input
+                    type="text"
+                    value={settings.openai_endpoint || ''}
+                    onChange={(e) => setSettings({ ...settings, openai_endpoint: e.target.value })}
+                    placeholder="https://api.openai.com/v1 (default) or http://127.0.0.1:1234"
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  >
-                    <option value="gpt-4o-mini">GPT-4o Mini (Recommended)</option>
-                    <option value="gpt-4o">GPT-4o</option>
-                    <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                    <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-                  </select>
+                  />
                   <p className="text-xs text-gray-500 mt-1">
-                    GPT-4o Mini offers the best balance of cost and quality for compliance analysis
+                    Custom OpenAI API endpoint. Leave empty to use the default OpenAI endpoint. Useful for proxies or OpenAI-compatible services.
                   </p>
                 </div>
               </div>

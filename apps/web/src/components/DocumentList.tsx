@@ -11,15 +11,27 @@ interface Document {
   download_url: string
 }
 
+interface ControlMapping {
+  file_id: string
+  filename: string
+  control_code: string
+  control_title: string
+  framework_name: string
+  confidence: number
+  reasoning: string
+  created_at: string
+}
+
 export default function DocumentList({ refreshTrigger }: { refreshTrigger?: number }) {
   const [documents, setDocuments] = useState<Document[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [controlMappings, setControlMappings] = useState<ControlMapping[]>([])
 
   const fetchDocuments = async () => {
     try {
       setIsLoading(true)
-      const response = await fetch('http://127.0.0.1:8000/documents')
+      const response = await fetch('/api/documents')
       
       if (response.ok) {
         const data = await response.json()
@@ -41,7 +53,7 @@ export default function DocumentList({ refreshTrigger }: { refreshTrigger?: numb
     }
 
     try {
-      const response = await fetch(`http://127.0.0.1:8000/documents/${documentId}`, {
+      const response = await fetch(`/api/documents/${documentId}`, {
         method: 'DELETE',
       })
 
@@ -83,7 +95,31 @@ export default function DocumentList({ refreshTrigger }: { refreshTrigger?: numb
 
   useEffect(() => {
     fetchDocuments()
+    loadControlMappings()
   }, [refreshTrigger])
+  
+  const loadControlMappings = () => {
+    try {
+      const mappings = localStorage.getItem('document_control_mappings')
+      if (mappings) {
+        setControlMappings(JSON.parse(mappings))
+      }
+    } catch (error) {
+      console.error('Failed to load control mappings:', error)
+    }
+  }
+  
+  const getDocumentMappings = (documentId: string) => {
+    return controlMappings.filter(mapping => mapping.file_id === documentId)
+  }
+  
+  const removeMapping = (documentId: string, controlCode: string) => {
+    const updatedMappings = controlMappings.filter(
+      mapping => !(mapping.file_id === documentId && mapping.control_code === controlCode)
+    )
+    setControlMappings(updatedMappings)
+    localStorage.setItem('document_control_mappings', JSON.stringify(updatedMappings))
+  }
 
   if (isLoading) {
     return (
@@ -131,26 +167,67 @@ export default function DocumentList({ refreshTrigger }: { refreshTrigger?: numb
                     <p>Size: {formatFileSize(doc.file_size)}</p>
                     <p>Uploaded: {formatDate(doc.created_at)}</p>
                     <p>Type: {doc.mime_type}</p>
+                    
+                    {/* Control Mappings */}
+                    {getDocumentMappings(doc.id).length > 0 && (
+                      <div className="mt-2 pt-2 border-t border-gray-200">
+                        <p className="text-xs font-medium text-gray-700 mb-1">🔗 Mapped to Controls:</p>
+                        <div className="space-y-1">
+                          {getDocumentMappings(doc.id).map((mapping, idx) => (
+                            <div key={idx} className="flex items-center justify-between bg-blue-50 rounded px-2 py-1">
+                              <div className="flex items-center space-x-2">
+                                <span className="text-xs font-medium text-blue-800">
+                                  {mapping.control_code}
+                                </span>
+                                <span className="text-xs text-blue-600">
+                                  {mapping.framework_name}
+                                </span>
+                                <div className={`w-1.5 h-1.5 rounded-full ${
+                                  mapping.confidence >= 0.8 ? 'bg-green-500' :
+                                  mapping.confidence >= 0.6 ? 'bg-yellow-500' : 'bg-orange-500'
+                                }`}></div>
+                              </div>
+                              <button
+                                onClick={() => removeMapping(doc.id, mapping.control_code)}
+                                className="text-xs text-red-600 hover:text-red-700"
+                                title="Remove mapping"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
               
-              <div className="flex space-x-2 ml-4">
-                <a
-                  href={doc.download_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center px-3 py-1 border border-gray-300 text-sm font-medium rounded text-gray-700 bg-white hover:bg-gray-50"
-                >
-                  Download
-                </a>
+              <div className="flex flex-col space-y-2 ml-4">
+                <div className="flex space-x-2">
+                  <a
+                    href={doc.download_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center px-3 py-1 border border-gray-300 text-sm font-medium rounded text-gray-700 bg-white hover:bg-gray-50"
+                  >
+                    Download
+                  </a>
+                  
+                  <button
+                    onClick={() => deleteDocument(doc.id)}
+                    className="inline-flex items-center px-3 py-1 border border-red-300 text-sm font-medium rounded text-red-700 bg-white hover:bg-red-50"
+                  >
+                    Delete
+                  </button>
+                </div>
                 
-                <button
-                  onClick={() => deleteDocument(doc.id)}
-                  className="inline-flex items-center px-3 py-1 border border-red-300 text-sm font-medium rounded text-red-700 bg-white hover:bg-red-50"
-                >
-                  Delete
-                </button>
+                {/* Control Mapping Summary */}
+                {getDocumentMappings(doc.id).length > 0 && (
+                  <div className="text-xs text-gray-500">
+                    🔗 {getDocumentMappings(doc.id).length} control{getDocumentMappings(doc.id).length > 1 ? 's' : ''} mapped
+                  </div>
+                )}
               </div>
             </div>
           </div>

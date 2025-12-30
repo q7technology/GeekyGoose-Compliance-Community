@@ -9,24 +9,26 @@ services:
       POSTGRES_DB: geekygoose
       POSTGRES_USER: geekygoose
       POSTGRES_PASSWORD: dev_password_123
-    ports:
-      - "5432:5432"
+    # No external ports - only accessible from internal network
+    expose:
+      - "5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./database/init:/docker-entrypoint-initdb.d
     networks:
-      - geekygoose
+      - backend
 
   redis:
     image: redis:7-alpine
     container_name: geekygoose-redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
+    # No external ports - only accessible from internal network
+    expose:
+      - "6379"
     volumes:
       - redis_data:/data
     networks:
-      - geekygoose
+      - backend
 
   minio:
     image: minio/minio:latest
@@ -35,14 +37,15 @@ services:
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin123
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+    # No external ports - only accessible from internal network
+    expose:
+      - "9000"
+      - "9001"
     volumes:
       - minio_data:/data
     command: server /data --console-address ":9001"
     networks:
-      - geekygoose
+      - backend
 
   api:
     build:
@@ -59,8 +62,9 @@ services:
       MINIO_BUCKET: geekygoose-docs
       JWT_SECRET: dev_jwt_secret_change_in_production
       OPENAI_API_KEY: ${OPENAI_API_KEY}
-    ports:
-      - "8000:8000"
+    # Internal port only - accessible through web service
+    expose:
+      - "8000"
     depends_on:
       - postgres
       - redis
@@ -68,7 +72,8 @@ services:
     volumes:
       - ./apps/api:/app
     networks:
-      - geekygoose
+      - backend
+      - frontend  # Also on frontend network to communicate with web
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
   web:
@@ -78,10 +83,14 @@ services:
     container_name: geekygoose-web
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
+      # Internal API URL for server-side calls
+      INTERNAL_API_URL: http://api:8000
+      # Public API URL will be handled by Next.js rewrites
+      NEXT_PUBLIC_API_URL: /api
       DATABASE_URL: postgresql://geekygoose:dev_password_123@postgres:5432/geekygoose
     ports:
-      - "3000:3000"
+      # Bind to all interfaces (0.0.0.0) for LAN access
+      - "0.0.0.0:3000:3000"
     depends_on:
       - api
     volumes:
@@ -89,8 +98,8 @@ services:
       - /app/node_modules
       - /app/.next
     networks:
-      - geekygoose
-    command: npm run dev
+      - frontend  # Only on frontend network for security
+    command: npm run dev -- --hostname 0.0.0.0
 
   worker:
     build:
@@ -116,7 +125,7 @@ services:
     volumes:
       - ./apps/api:/app
     networks:
-      - geekygoose
+      - backend  # Only on backend network
     command: celery -A celery_app worker --loglevel=info
 
 volumes:
@@ -125,5 +134,11 @@ volumes:
   minio_data:
 
 networks:
-  geekygoose:
+  # Backend network - internal services only
+  backend:
+    driver: bridge
+    internal: true  # No external access
+  
+  # Frontend network - for web app to communicate with API
+  frontend:
     driver: bridge

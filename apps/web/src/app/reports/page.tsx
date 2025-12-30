@@ -69,7 +69,7 @@ export default function ReportsPage() {
 
   const fetchFrameworks = async () => {
     try {
-      const response = await fetch('http://localhost:8000/frameworks');
+      const response = await fetch('/api/frameworks');
       if (response.ok) {
         const data = await response.json();
         setFrameworks(data.frameworks);
@@ -85,7 +85,7 @@ export default function ReportsPage() {
   const fetchControlsWithScans = async (frameworkId: string) => {
     try {
       setLoading(true);
-      const controlsResponse = await fetch(`http://localhost:8000/frameworks/${frameworkId}/controls`);
+      const controlsResponse = await fetch(`/api/frameworks/${frameworkId}/controls`);
       
       if (controlsResponse.ok) {
         const controlsData = await controlsResponse.json();
@@ -94,14 +94,14 @@ export default function ReportsPage() {
         const controlsWithScans = await Promise.all(
           controlsData.controls.map(async (control: Control) => {
             try {
-              const scansResponse = await fetch(`http://localhost:8000/controls/${control.id}/scans`);
+              const scansResponse = await fetch(`/api/controls/${control.id}/scans`);
               if (scansResponse.ok) {
                 const scansData = await scansResponse.json();
                 if (scansData.scans.length > 0) {
                   // Get the latest completed scan
                   const latestScan = scansData.scans.find((scan: any) => scan.status === 'completed');
                   if (latestScan) {
-                    const scanDetailResponse = await fetch(`http://localhost:8000/scans/${latestScan.id}`);
+                    const scanDetailResponse = await fetch(`/api/scans/${latestScan.id}`);
                     if (scanDetailResponse.ok) {
                       const scanDetail = await scanDetailResponse.json();
                       control.latest_scan = scanDetail;

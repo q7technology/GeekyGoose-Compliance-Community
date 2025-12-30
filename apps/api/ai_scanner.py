@@ -12,6 +12,24 @@ from models import Control, Requirement
 
 logger = logging.getLogger(__name__)
 
+def create_chat_completion_safe(client, model, messages, temperature=None):
+    """
+    Create a chat completion with safe fallbacks for different endpoint capabilities.
+    Some OpenAI-compatible endpoints don't support all features.
+    """
+    # Base parameters
+    params = {
+        "model": model,
+        "messages": messages
+    }
+    
+    # Add optional parameters
+    if temperature is not None:
+        params["temperature"] = temperature
+    
+    # Make request - LM Studio and similar don't support JSON mode
+    return client.chat.completions.create(**params)
+
 # Initialize OpenAI client lazily
 client = None
 
@@ -21,11 +39,19 @@ def get_ai_client():
     
     if provider == 'openai':
         api_key = os.getenv('OPENAI_API_KEY')
-        if not api_key or api_key == 'your_openai_api_key_here':
-            raise ValueError("OPENAI_API_KEY not configured. Please set a valid OpenAI API key.")
+        base_url = os.getenv('OPENAI_ENDPOINT')
+        
+        # Only require API key if using default OpenAI endpoint
+        if (not api_key or api_key == 'your_openai_api_key_here') and not base_url:
+            raise ValueError("OPENAI_API_KEY not configured. Please set a valid OpenAI API key for default OpenAI endpoint.")
+        
+        # Use dummy key for custom endpoints that don't require authentication
+        if (not api_key or api_key == 'your_openai_api_key_here') and base_url:
+            api_key = "sk-dummy-key-for-local-api"
+        
         try:
             from openai import OpenAI
-            return OpenAI(api_key=api_key)
+            return OpenAI(api_key=api_key, base_url=base_url)
         except Exception as e:
             logger.error(f"Failed to initialize OpenAI client: {e}")
             raise
@@ -119,7 +145,8 @@ class ComplianceScanner:
                 response = self._call_ollama(ai_client, prompt)
             else:
                 # Handle OpenAI - use standard chat completions with JSON
-                response = ai_client.chat.completions.create(
+                response = create_chat_completion_safe(
+                    client=ai_client,
                     model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
                     messages=[
                         {

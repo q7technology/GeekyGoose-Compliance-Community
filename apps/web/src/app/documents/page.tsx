@@ -31,7 +31,7 @@ export default function DocumentsPage() {
                 Upload Documents
               </h2>
               <div className="bg-white p-6 rounded-lg border border-gray-200">
-                <FileUpload onUploadComplete={handleUploadComplete} />
+                <FileUpload onUploadComplete={handleUploadComplete} enableControlMapping={true} />
               </div>
             </div>
 
@@ -47,16 +47,32 @@ export default function DocumentsPage() {
             </div>
 
             <div className="bg-green-50 p-4 rounded-lg">
-              <h3 className="font-medium text-green-900 mb-2">📋 Next Steps</h3>
+              <h3 className="font-medium text-green-900 mb-2">🤖 Smart Control Mapping</h3>
               <p className="text-sm text-green-800 mb-3">
-                After uploading documents, link them to compliance controls for AI analysis.
+                Our AI automatically scans uploaded documents and suggests relevant compliance controls based on content analysis.
               </p>
-              <Link
-                href="/controls"
-                className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-              >
-                Browse Controls →
-              </Link>
+              <div className="flex space-x-2">
+                <Link
+                  href="/templates"
+                  className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                >
+                  Browse Templates →
+                </Link>
+                <button
+                  onClick={() => {
+                    const mappings = localStorage.getItem('document_control_mappings')
+                    if (mappings) {
+                      const parsedMappings = JSON.parse(mappings)
+                      alert(`Found ${parsedMappings.length} document-control mappings in storage.`)
+                    } else {
+                      alert('No control mappings found yet. Upload documents to get AI suggestions!')
+                    }
+                  }}
+                  className="inline-flex items-center px-3 py-1.5 border border-green-600 text-xs font-medium rounded text-green-700 bg-transparent hover:bg-green-100"
+                >
+                  View Mappings
+                </button>
+              </div>
             </div>
           </div>
 

@@ -118,7 +118,7 @@ export default function ControlDetailPage() {
 
   const fetchControlDetails = async () => {
     try {
-      const response = await fetch(`http://localhost:8000/controls/${controlId}`);
+      const response = await fetch(`/api/controls/${controlId}`);
       if (response.ok) {
         const data = await response.json();
         setControl(data);
@@ -130,7 +130,7 @@ export default function ControlDetailPage() {
 
   const fetchEvidence = async () => {
     try {
-      const response = await fetch(`http://localhost:8000/controls/${controlId}/evidence`);
+      const response = await fetch(`/api/controls/${controlId}/evidence`);
       if (response.ok) {
         const data = await response.json();
         setEvidence(data.evidence);
@@ -142,13 +142,13 @@ export default function ControlDetailPage() {
 
   const fetchScans = async () => {
     try {
-      const response = await fetch(`http://localhost:8000/controls/${controlId}/scans`);
+      const response = await fetch(`/api/controls/${controlId}/scans`);
       if (response.ok) {
         const data = await response.json();
         setScans(data.scans);
         if (data.scans.length > 0) {
           // Fetch latest scan details
-          const latestScanResponse = await fetch(`http://localhost:8000/scans/${data.scans[0].id}`);
+          const latestScanResponse = await fetch(`/api/scans/${data.scans[0].id}`);
           if (latestScanResponse.ok) {
             const latestScanData = await latestScanResponse.json();
             setLatestScan(latestScanData);
@@ -162,7 +162,7 @@ export default function ControlDetailPage() {
 
   const fetchAvailableDocuments = async () => {
     try {
-      const response = await fetch('http://localhost:8000/documents');
+      const response = await fetch('/api/documents');
       if (response.ok) {
         const data = await response.json();
         setAvailableDocuments(data.documents);
@@ -175,7 +175,7 @@ export default function ControlDetailPage() {
   const startScan = async () => {
     setScanLoading(true);
     try {
-      const response = await fetch(`http://localhost:8000/controls/${controlId}/scan`, {
+      const response = await fetch(`/api/controls/${controlId}/scan`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -203,7 +203,7 @@ export default function ControlDetailPage() {
     setLinkingEvidence(documentId);
     setLinkingInProgress(documentId);
     try {
-      const response = await fetch(`http://localhost:8000/documents/${documentId}/link-evidence`, {
+      const response = await fetch(`/api/documents/${documentId}/link-evidence`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

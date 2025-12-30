@@ -9,12 +9,46 @@ interface UploadedFile {
   file_size: number
   created_at: string
   download_url: string
+  suggested_controls?: Array<{
+    control_code: string
+    control_title: string
+    framework_name: string
+    confidence: number
+    reasoning: string
+  }>
 }
 
-export default function FileUpload({ onUploadComplete }: { onUploadComplete?: () => void }) {
+interface Template {
+  id: string
+  name: string
+  description: string
+  control: {
+    id: string
+    code: string
+    title: string
+    framework_name: string
+  }
+  evidence_requirements: Array<{
+    requirement_code: string
+    evidence_type: string
+    description: string
+  }>
+}
+
+export default function FileUpload({ onUploadComplete, enableControlMapping = false }: { onUploadComplete?: () => void, enableControlMapping?: boolean }) {
   const [isDragging, setIsDragging] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadStatus, setUploadStatus] = useState<string | null>(null)
+  const [scanningForControls, setScanningForControls] = useState(false)
+  const [suggestedMappings, setSuggestedMappings] = useState<Array<{
+    control_code: string
+    control_title: string
+    framework_name: string
+    confidence: number
+    reasoning: string
+  }>>([])  
+  const [showMappingSuggestions, setShowMappingSuggestions] = useState(false)
+  const [lastUploadedFile, setLastUploadedFile] = useState<UploadedFile | null>(null)
 
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault()
@@ -41,14 +75,28 @@ export default function FileUpload({ onUploadComplete }: { onUploadComplete?: ()
     formData.append('file', file)
 
     try {
-      const response = await fetch('http://127.0.0.1:8000/documents/upload', {
+      const response = await fetch('/api/documents/upload', {
         method: 'POST',
         body: formData,
       })
 
       if (response.ok) {
         const result = await response.json()
-        setUploadStatus(`✅ Successfully uploaded: ${result.filename}`)
+        setLastUploadedFile(result)
+        
+        // If control mapping is enabled and we got suggestions from the server
+        if (enableControlMapping && result.suggested_controls && result.suggested_controls.length > 0) {
+          setSuggestedMappings(result.suggested_controls)
+          setShowMappingSuggestions(true)
+          const displayName = file.name.split('\\').pop()?.split('/').pop() || file.name
+          setUploadStatus(`✅ Upload complete • AI found ${result.suggested_controls.length} control matches for ${displayName}`)
+        } else if (enableControlMapping) {
+          // Fallback to client-side analysis if no server suggestions
+          await scanFileForControlMatches(file, result)
+        } else {
+          setUploadStatus(`✅ Successfully uploaded: ${result.filename}`)
+        }
+        
         onUploadComplete?.()
       } else {
         const error = await response.json()
@@ -59,6 +107,263 @@ export default function FileUpload({ onUploadComplete }: { onUploadComplete?: ()
     } finally {
       setIsUploading(false)
     }
+  }
+
+  const scanFileForControlMatches = async (file: File, uploadedFile: UploadedFile) => {
+    setScanningForControls(true)
+    // Extract just the filename without the path for display
+    const displayName = file.name.split('\\').pop()?.split('/').pop() || file.name
+    setUploadStatus(`🔍 Scanning ${displayName} for control mappings...`)
+    
+    try {
+      // Get available templates/controls from localStorage
+      const storedTemplates = localStorage.getItem('compliance_templates')
+      let availableTemplates: Template[] = []
+      
+      if (storedTemplates) {
+        availableTemplates = JSON.parse(storedTemplates)
+      }
+      
+      if (availableTemplates.length === 0) {
+        setUploadStatus(`⚠️ Upload complete • No templates available for control mapping`)
+        setScanningForControls(false)
+        return
+      }
+      
+      // Use actual AI service for document analysis
+      const suggestions = await analyzeDocumentWithAI(file, availableTemplates)
+      
+      setSuggestedMappings(suggestions)
+      if (suggestions.length > 0) {
+        setShowMappingSuggestions(true)
+        setUploadStatus(`✅ Upload complete • AI found ${suggestions.length} potential control matches`)
+      } else {
+        setUploadStatus(`✅ Upload complete • No relevant control matches found`)
+      }
+      
+    } catch (error) {
+      console.error('Control mapping failed:', error)
+      setUploadStatus(`✅ Upload complete • AI analysis unavailable`)
+    } finally {
+      setScanningForControls(false)
+    }
+  }
+  
+  const analyzeDocumentWithAI = async (file: File, templates: Template[]) => {
+    try {
+      // Read file content for analysis (for text files)
+      let fileContent = ''
+      // Extract just the filename without the path
+      const filename = file.name.split('\\').pop()?.split('/').pop()?.toLowerCase() || file.name.toLowerCase()
+      
+      if (file.type === 'text/plain' || filename.endsWith('.txt')) {
+        try {
+          fileContent = await file.text()
+        } catch (error) {
+          console.log('Could not read file content, using filename analysis only')
+        }
+      }
+      
+      // Prepare control context for AI
+      const controlsContext = templates.map(t => ({
+        code: t.control.code,
+        title: t.control.title,
+        framework: t.control.framework_name,
+        description: t.description,
+        evidence_types: t.evidence_requirements.map(req => req.evidence_type).join(', '),
+        evidence_descriptions: t.evidence_requirements.map(req => req.description).join(' | ')
+      }))
+      
+      // Create AI analysis prompt
+      const analysisPrompt = `
+Analyze the following document and determine which compliance controls it might relate to.
+
+Document filename: ${filename}
+Document type: ${file.type}
+File content preview: ${fileContent.substring(0, 1000)}${fileContent.length > 1000 ? '...' : ''}
+
+Available compliance controls:
+${controlsContext.map(c => `${c.code}: ${c.title} (${c.framework}) - Evidence needed: ${c.evidence_types}`).join('\n')}
+
+For each relevant control, provide:
+1. Control code and title
+2. Confidence score (0.0-1.0)
+3. Brief reasoning
+
+Respond in JSON format with a "suggestions" array containing objects with: control_code, control_title, framework_name, confidence, reasoning.
+Limit to the top 3 most relevant matches. If no relevant matches, return empty array.`
+      
+      // Call AI service using configured settings
+      const response = await fetch('/api/ai/analyze-text', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          prompt: analysisPrompt,
+          max_tokens: 1000,
+          temperature: 0.3
+        })
+      })
+      
+      if (response.ok) {
+        const result = await response.json()
+        
+        try {
+          // Try to parse AI response as JSON
+          const aiResponse = JSON.parse(result.response)
+          if (aiResponse.suggestions && Array.isArray(aiResponse.suggestions)) {
+            return aiResponse.suggestions.map((s: any) => ({
+              control_code: s.control_code || '',
+              control_title: s.control_title || '',
+              framework_name: s.framework_name || '',
+              confidence: Math.min(Math.max(s.confidence || 0, 0), 1),
+              reasoning: s.reasoning || 'AI-generated suggestion'
+            }))
+          }
+        } catch (parseError) {
+          console.error('Failed to parse AI response:', parseError)
+        }
+      }
+      
+      // Fallback to filename-based analysis if AI fails
+      return generateFallbackSuggestions(filename, templates)
+      
+    } catch (error) {
+      console.error('AI analysis failed:', error)
+      const cleanFilename = file.name.split('\\').pop()?.split('/').pop()?.toLowerCase() || file.name.toLowerCase()
+      return generateFallbackSuggestions(cleanFilename, templates)
+    }
+  }
+  
+  const generateFallbackSuggestions = (filename: string, templates: Template[]) => {
+    const suggestions = []
+    
+    // Simple keyword matching with deduplication
+    const usedTemplates = new Set<string>()
+    
+    // Multi-Factor Authentication (MFA) documents
+    if ((filename.includes('mfa') || filename.includes('multi-factor') || filename.includes('authentication') || filename.includes('2fa')) && templates.length > 0) {
+      const mfaTemplate = templates.find(t => 
+        (t.control.title.toLowerCase().includes('authentication') ||
+         t.control.title.toLowerCase().includes('access') ||
+         t.control.code.includes('AC') || t.control.code.includes('IA') ||
+         t.description.toLowerCase().includes('authentication')) &&
+        !usedTemplates.has(t.id)
+      )
+      
+      if (mfaTemplate) {
+        usedTemplates.add(mfaTemplate.id)
+        suggestions.push({
+          control_code: mfaTemplate.control.code,
+          control_title: mfaTemplate.control.title,
+          framework_name: mfaTemplate.control.framework_name,
+          confidence: 0.9,
+          reasoning: `Document relates to Multi-Factor Authentication, directly relevant to ${mfaTemplate.control.code} access control requirements.`
+        })
+      }
+    }
+    
+    // Error/incident screenshots and logs
+    if ((filename.includes('error') || filename.includes('screenshot') || filename.includes('incident') || filename.includes('log')) && templates.length > 0) {
+      const incidentTemplate = templates.find(t => 
+        (t.control.title.toLowerCase().includes('incident') ||
+         t.control.title.toLowerCase().includes('monitoring') ||
+         t.control.title.toLowerCase().includes('security') ||
+         t.control.code.includes('IR') || t.control.code.includes('SI') ||
+         t.description.toLowerCase().includes('incident')) &&
+        !usedTemplates.has(t.id)
+      )
+      
+      if (incidentTemplate) {
+        usedTemplates.add(incidentTemplate.id)
+        suggestions.push({
+          control_code: incidentTemplate.control.code,
+          control_title: incidentTemplate.control.title,
+          framework_name: incidentTemplate.control.framework_name,
+          confidence: 0.75,
+          reasoning: `Error screenshot/log provides evidence for ${incidentTemplate.control.code} incident response or security monitoring.`
+        })
+      }
+    }
+    
+    // Policy documents
+    if ((filename.includes('policy') || filename.includes('procedure')) && templates.length > 0) {
+      const policyTemplate = templates.find(t => 
+        (t.description.toLowerCase().includes('policy') || 
+         t.evidence_requirements.some(req => req.evidence_type === 'policy')) &&
+        !usedTemplates.has(t.id)
+      )
+      
+      if (policyTemplate) {
+        usedTemplates.add(policyTemplate.id)
+        suggestions.push({
+          control_code: policyTemplate.control.code,
+          control_title: policyTemplate.control.title,
+          framework_name: policyTemplate.control.framework_name,
+          confidence: 0.8,
+          reasoning: `Filename indicates this is a policy document relevant to ${policyTemplate.control.code}.`
+        })
+      }
+    }
+    
+    // Access control documents  
+    if ((filename.includes('access') || filename.includes('user') || filename.includes('identity')) && templates.length > 0) {
+      const accessTemplate = templates.find(t => 
+        (t.control.title.toLowerCase().includes('access') ||
+         t.control.title.toLowerCase().includes('identity') ||
+         t.control.code.includes('AC') || t.control.code.includes('IA')) &&
+        !usedTemplates.has(t.id)
+      )
+      
+      if (accessTemplate) {
+        usedTemplates.add(accessTemplate.id)
+        suggestions.push({
+          control_code: accessTemplate.control.code,
+          control_title: accessTemplate.control.title,
+          framework_name: accessTemplate.control.framework_name,
+          confidence: 0.7,
+          reasoning: `Document appears to be access control related, matching ${accessTemplate.control.code}.`
+        })
+      }
+    }
+    
+    // If still no matches and templates available, suggest the first unused template
+    if (suggestions.length === 0 && templates.length > 0) {
+      const firstTemplate = templates[0]
+      suggestions.push({
+        control_code: firstTemplate.control.code,
+        control_title: firstTemplate.control.title,
+        framework_name: firstTemplate.control.framework_name,
+        confidence: 0.4,
+        reasoning: `General document that may contain evidence relevant to ${firstTemplate.control.code}.`
+      })
+    }
+    
+    return suggestions.slice(0, 3)
+  }
+  
+  const linkToControl = (suggestion: typeof suggestedMappings[0]) => {
+    // Store the mapping suggestion in localStorage for potential use
+    const mappingSuggestion = {
+      file_id: lastUploadedFile?.id,
+      filename: lastUploadedFile?.filename,
+      control_code: suggestion.control_code,
+      control_title: suggestion.control_title,
+      framework_name: suggestion.framework_name,
+      confidence: suggestion.confidence,
+      reasoning: suggestion.reasoning,
+      created_at: new Date().toISOString()
+    }
+    
+    const existingMappings = localStorage.getItem('document_control_mappings')
+    const mappings = existingMappings ? JSON.parse(existingMappings) : []
+    mappings.unshift(mappingSuggestion)
+    localStorage.setItem('document_control_mappings', JSON.stringify(mappings))
+    
+    setUploadStatus(`✅ Document linked to ${suggestion.control_code} - ${suggestion.control_title}`)
+    setShowMappingSuggestions(false)
+    setSuggestedMappings([])
   }
 
   const formatFileSize = (bytes: number) => {
@@ -113,10 +418,10 @@ export default function FileUpload({ onUploadComplete }: { onUploadComplete?: ()
                 : 'bg-blue-600 hover:bg-blue-700 cursor-pointer'
             }`}
           >
-            {isUploading ? (
+            {isUploading || scanningForControls ? (
               <>
                 <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                Uploading...
+                {scanningForControls ? 'Scanning for Controls...' : 'Uploading...'}
               </>
             ) : (
               'Choose File'
@@ -128,6 +433,70 @@ export default function FileUpload({ onUploadComplete }: { onUploadComplete?: ()
       {uploadStatus && (
         <div className="mt-4 p-3 rounded-lg bg-gray-50 text-sm">
           {uploadStatus}
+        </div>
+      )}
+      
+      {/* Control Mapping Suggestions */}
+      {enableControlMapping && showMappingSuggestions && suggestedMappings.length > 0 && (
+        <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="flex items-center mb-3">
+            <div className="text-blue-600 mr-2">🔗</div>
+            <h4 className="font-medium text-blue-900">Suggested Control Mappings</h4>
+          </div>
+          <p className="text-sm text-blue-700 mb-3">
+            Based on the analysis of <strong>{lastUploadedFile?.filename?.split('\\').pop()?.split('/').pop() || lastUploadedFile?.filename}</strong>, here are potential compliance control matches:
+          </p>
+          
+          <div className="space-y-3">
+            {suggestedMappings.map((suggestion, index) => (
+              <div key={index} className="bg-white border border-blue-200 rounded-lg p-3">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center mb-1">
+                      <span className="font-medium text-blue-900 mr-2">
+                        {suggestion.control_code}: {suggestion.control_title}
+                      </span>
+                      <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded-full text-xs">
+                        {suggestion.framework_name}
+                      </span>
+                    </div>
+                    <div className="flex items-center mb-2">
+                      <div className="flex items-center mr-3">
+                        <div className={`w-2 h-2 rounded-full mr-1 ${
+                          suggestion.confidence >= 0.8 ? 'bg-green-500' :
+                          suggestion.confidence >= 0.6 ? 'bg-yellow-500' : 'bg-red-500'
+                        }`}></div>
+                        <span className="text-xs text-gray-600">
+                          {Math.round(suggestion.confidence * 100)}% confidence
+                        </span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-600">{suggestion.reasoning}</p>
+                  </div>
+                  <div className="ml-3">
+                    <button
+                      onClick={() => linkToControl(suggestion)}
+                      className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700"
+                    >
+                      Link to Control
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          
+          <div className="mt-3 pt-3 border-t border-blue-200">
+            <button
+              onClick={() => {
+                setShowMappingSuggestions(false)
+                setSuggestedMappings([])
+              }}
+              className="text-xs text-blue-600 hover:text-blue-700"
+            >
+              Dismiss suggestions
+            </button>
+          </div>
         </div>
       )}
     </div>

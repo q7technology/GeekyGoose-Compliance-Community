@@ -32,7 +32,7 @@ export default function ControlsPage() {
 
   const fetchFrameworks = async () => {
     try {
-      const response = await fetch('http://localhost:8000/frameworks');
+      const response = await fetch('/api/frameworks');
       if (response.ok) {
         const data = await response.json();
         setFrameworks(data.frameworks);
@@ -49,7 +49,7 @@ export default function ControlsPage() {
   const fetchControls = async (frameworkId: string) => {
     setLoading(true);
     try {
-      const response = await fetch(`http://localhost:8000/frameworks/${frameworkId}/controls`);
+      const response = await fetch(`/api/frameworks/${frameworkId}/controls`);
       if (response.ok) {
         const data = await response.json();
         setControls(data.controls);
