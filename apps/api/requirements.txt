@@ -1,7 +1,7 @@
 # Core FastAPI and web framework
 fastapi>=0.115.0
 uvicorn[standard]==0.32.0
-python-multipart==0.0.12
+python-multipart==0.0.18
 
 # Database and ORM
 sqlalchemy==2.0.36
