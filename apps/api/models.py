@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, DateTime, Integer, Text, BigInteger, ForeignKey, Float
+from sqlalchemy import Column, String, DateTime, Integer, Text, BigInteger, ForeignKey, Float, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
@@ -77,7 +77,7 @@ class Document(Base):
     __tablename__ = "documents"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    org_id = Column(UUID(as_uuid=True), ForeignKey("orgs.id"), nullable=False)
+    org_id = Column(UUID(as_uuid=True), ForeignKey("orgs.id", ondelete="CASCADE"), nullable=False)
     filename = Column(String(500), nullable=False)
     mime_type = Column(String(100))
     storage_key = Column(String(1000), nullable=False)
@@ -87,19 +87,33 @@ class Document(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
     
+    # Performance: Add indexes for frequently queried fields
+    __table_args__ = (
+        Index('idx_document_org_id', 'org_id'),
+        Index('idx_document_created_at', 'created_at'),
+        Index('idx_document_uploaded_by', 'uploaded_by'),
+        Index('idx_document_sha256', 'sha256'),
+    )
+    
     org = relationship("Org", back_populates="documents")
     uploader = relationship("User")
-    pages = relationship("DocumentPage", back_populates="document")
-    control_links = relationship("DocumentControlLink", back_populates="document")
+    pages = relationship("DocumentPage", back_populates="document", cascade="all, delete-orphan")
+    control_links = relationship("DocumentControlLink", back_populates="document", cascade="all, delete-orphan")
 
 class DocumentPage(Base):
     __tablename__ = "document_pages"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=False)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
     page_num = Column(Integer, nullable=False)
     text = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Performance: Add indexes for document queries
+    __table_args__ = (
+        Index('idx_document_page_document_id', 'document_id'),
+        Index('idx_document_page_num', 'document_id', 'page_num'),
+    )
     
     document = relationship("Document", back_populates="pages")
 
@@ -124,12 +138,20 @@ class DocumentControlLink(Base):
     __tablename__ = "document_control_links"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=False)
-    control_id = Column(UUID(as_uuid=True), ForeignKey("controls.id"), nullable=False)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    control_id = Column(UUID(as_uuid=True), ForeignKey("controls.id", ondelete="CASCADE"), nullable=False)
     confidence = Column(Float, nullable=False, default=0.0)
     reasoning = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Performance: Add indexes for link queries and prevent duplicates
+    __table_args__ = (
+        Index('idx_doc_control_link_document_id', 'document_id'),
+        Index('idx_doc_control_link_control_id', 'control_id'),
+        Index('idx_doc_control_link_confidence', 'confidence'),
+        Index('idx_doc_control_unique', 'document_id', 'control_id', unique=True),
+    )
     
     document = relationship("Document", back_populates="control_links")
     control = relationship("Control")

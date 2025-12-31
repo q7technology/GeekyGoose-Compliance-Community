@@ -178,15 +178,55 @@ export default function DocumentList({ refreshTrigger }: { refreshTrigger?: numb
                     <p>Type: {doc.mime_type}</p>
                     
                     {/* AI Processing Status */}
-                    <div className="flex items-center space-x-2 mt-2">
-                      {doc.ai_processed ? (
-                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                          🧠 AI Analyzed
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
-                          ⏳ Processing
-                        </span>
+                    <div className="flex items-center justify-between mt-2">
+                      <div className="flex items-center space-x-2">
+                        {doc.ai_processed ? (
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            🧠 AI Analyzed
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                            ⏳ Processing
+                          </span>
+                        )}
+                      </div>
+                      
+                      {/* AI Analysis Completion Control */}
+                      {doc.ai_processed && (
+                        <div className="flex items-center space-x-1">
+                          {doc.control_links.length > 0 ? (
+                            <div className="flex items-center space-x-1">
+                              <span className="text-xs text-green-700 font-medium">
+                                {doc.control_links.length} control{doc.control_links.length > 1 ? 's' : ''} found
+                              </span>
+                              <button
+                                onClick={() => {
+                                  const summary = doc.control_links.map(link => 
+                                    `• ${link.control_code}: ${link.control_title} (${Math.round(link.confidence * 100)}% confidence)`
+                                  ).join('\n')
+                                  alert(`AI Analysis Results for "${doc.filename}":\n\n${summary}\n\nClick on individual controls below to see detailed reasoning.`)
+                                }}
+                                className="text-xs text-blue-600 hover:text-blue-700 underline"
+                                title="View AI analysis summary"
+                              >
+                                View Summary
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center space-x-1">
+                              <span className="text-xs text-gray-600">No controls matched</span>
+                              <button
+                                onClick={() => {
+                                  alert(`AI Analysis Complete for "${doc.filename}":\n\nNo compliance controls were automatically matched to this document.\n\nThis could mean:\n• The document doesn't contain compliance-related content\n• The content doesn't match Essential Eight controls\n• Manual review may be needed\n\nYou can manually link controls using the Controls page.`)
+                                }}
+                                className="text-xs text-blue-600 hover:text-blue-700 underline"
+                                title="Why no controls were found"
+                              >
+                                Why?
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                     
@@ -196,7 +236,14 @@ export default function DocumentList({ refreshTrigger }: { refreshTrigger?: numb
                         <p className="text-xs font-medium text-gray-700 mb-1">🤖 AI-Linked Controls:</p>
                         <div className="space-y-1 max-w-full">
                           {doc.control_links.map((link, idx) => (
-                            <div key={idx} className="flex items-center justify-between bg-green-50 rounded px-2 py-1 min-w-0">
+                            <button
+                              key={idx}
+                              onClick={() => {
+                                alert(`Control Mapping Details:\n\nControl: ${link.control_code}\nTitle: ${link.control_title}\nConfidence: ${Math.round(link.confidence * 100)}%\n\nAI Reasoning:\n${link.reasoning || 'No detailed reasoning provided.'}`)
+                              }}
+                              className="w-full flex items-center justify-between bg-green-50 hover:bg-green-100 rounded px-2 py-1 min-w-0 transition-colors"
+                              title="Click to see AI reasoning"
+                            >
                               <div className="flex items-center space-x-2 flex-1 min-w-0">
                                 <span className="text-xs font-medium text-green-800 flex-shrink-0">
                                   {link.control_code}
@@ -212,7 +259,7 @@ export default function DocumentList({ refreshTrigger }: { refreshTrigger?: numb
                               <span className="text-xs text-green-700 flex-shrink-0 ml-2">
                                 {Math.round(link.confidence * 100)}%
                               </span>
-                            </div>
+                            </button>
                           ))}
                         </div>
                       </div>

@@ -45,6 +45,21 @@ interface Control {
   latest_scan?: Scan;
 }
 
+interface DocumentAIResult {
+  id: string;
+  filename: string;
+  mime_type: string;
+  ai_processed: boolean;
+  control_links: Array<{
+    control_id: string;
+    control_code: string;
+    control_title: string;
+    confidence: number;
+    reasoning: string;
+  }>;
+  created_at: string;
+}
+
 interface Framework {
   id: string;
   name: string;
@@ -54,8 +69,11 @@ interface Framework {
 export default function ReportsPage() {
   const [frameworks, setFrameworks] = useState<Framework[]>([]);
   const [controls, setControls] = useState<Control[]>([]);
+  const [documents, setDocuments] = useState<DocumentAIResult[]>([]);
   const [loading, setLoading] = useState(true);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
   const [selectedFramework, setSelectedFramework] = useState<string>('');
+  const [aiAnalysisResults, setAiAnalysisResults] = useState<any>(null);
 
   useEffect(() => {
     fetchFrameworks();
@@ -64,6 +82,7 @@ export default function ReportsPage() {
   useEffect(() => {
     if (selectedFramework) {
       fetchControlsWithScans(selectedFramework);
+      fetchDocumentsWithAI();
     }
   }, [selectedFramework]);
 
@@ -125,6 +144,53 @@ export default function ReportsPage() {
     }
   };
 
+  const fetchDocumentsWithAI = async () => {
+    try {
+      setDocumentsLoading(true);
+      const response = await fetch('/api/documents');
+      if (response.ok) {
+        const data = await response.json();
+        // Filter documents that have AI processing (have control links)
+        const documentsWithAI = data.documents.filter((doc: DocumentAIResult) => 
+          doc.control_links && doc.control_links.length > 0
+        );
+        setDocuments(documentsWithAI);
+      }
+    } catch (error) {
+      console.error('Failed to fetch documents:', error);
+    } finally {
+      setDocumentsLoading(false);
+    }
+  };
+
+  const runComprehensiveAIAnalysis = async () => {
+    try {
+      setDocumentsLoading(true);
+      const response = await fetch('/api/reports/comprehensive-analysis', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          framework_id: selectedFramework
+        }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setAiAnalysisResults(data);
+        alert('Comprehensive AI analysis complete! See results below.');
+      } else {
+        alert('Failed to run comprehensive analysis. Please try again.');
+      }
+    } catch (error) {
+      console.error('Failed to run comprehensive analysis:', error);
+      alert('Error running analysis. Please check your connection.');
+    } finally {
+      setDocumentsLoading(false);
+    }
+  };
+
   const getComplianceStats = () => {
     const stats = {
       total: controls.length,
@@ -133,7 +199,10 @@ export default function ReportsPage() {
       partial: 0,
       failed: 0,
       notFound: 0,
-      totalGaps: 0
+      totalGaps: 0,
+      totalDocuments: documents.length,
+      documentsWithAI: documents.length, // Already filtered to only AI-processed documents
+      documentControlLinks: documents.reduce((sum, doc) => sum + doc.control_links.length, 0)
     };
 
     controls.forEach(control => {
@@ -285,7 +354,7 @@ export default function ReportsPage() {
         </div>
 
         {/* Summary Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-7 gap-4 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-5 gap-4 mb-8">
           <div className="bg-white p-4 rounded-lg border border-gray-200">
             <div className="text-2xl font-bold text-gray-900">{stats.total}</div>
             <div className="text-sm text-gray-600">Total Controls</div>
@@ -299,20 +368,47 @@ export default function ReportsPage() {
             <div className="text-sm text-gray-600">Compliant</div>
           </div>
           <div className="bg-white p-4 rounded-lg border border-gray-200">
-            <div className="text-2xl font-bold text-yellow-600">{stats.partial}</div>
-            <div className="text-sm text-gray-600">Partial</div>
-          </div>
-          <div className="bg-white p-4 rounded-lg border border-gray-200">
             <div className="text-2xl font-bold text-red-600">{stats.failed}</div>
             <div className="text-sm text-gray-600">Non-Compliant</div>
           </div>
           <div className="bg-white p-4 rounded-lg border border-gray-200">
-            <div className="text-2xl font-bold text-gray-600">{stats.notFound}</div>
-            <div className="text-sm text-gray-600">No Evidence</div>
-          </div>
-          <div className="bg-white p-4 rounded-lg border border-gray-200">
             <div className="text-2xl font-bold text-purple-600">{stats.totalGaps}</div>
             <div className="text-sm text-gray-600">Total Gaps</div>
+          </div>
+        </div>
+
+        {/* AI Document Analysis Stats */}
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-6 mb-8 border border-blue-200">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">🤖 AI Document Analysis Overview</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            <div className="bg-white p-4 rounded-lg border border-blue-200">
+              <div className="text-2xl font-bold text-blue-600">{stats.totalDocuments}</div>
+              <div className="text-sm text-gray-600">Total Documents</div>
+            </div>
+            <div className="bg-white p-4 rounded-lg border border-blue-200">
+              <div className="text-2xl font-bold text-green-600">{stats.documentsWithAI}</div>
+              <div className="text-sm text-gray-600">AI Analyzed</div>
+            </div>
+            <div className="bg-white p-4 rounded-lg border border-blue-200">
+              <div className="text-2xl font-bold text-indigo-600">{stats.documentControlLinks}</div>
+              <div className="text-sm text-gray-600">AI Control Links</div>
+            </div>
+            <div className="bg-white p-4 rounded-lg border border-blue-200">
+              <button
+                onClick={runComprehensiveAIAnalysis}
+                disabled={documentsLoading}
+                className="w-full h-full flex flex-col items-center justify-center text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 rounded transition-colors"
+              >
+                {documentsLoading ? (
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-white"></div>
+                ) : (
+                  <>
+                    <div className="text-lg font-bold">🧠</div>
+                    <div className="text-xs">Run Analysis</div>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -328,6 +424,114 @@ export default function ReportsPage() {
             Export Report (CSV)
           </button>
         </div>
+
+        {/* Document AI Results */}
+        {documents.length > 0 && (
+          <div className="bg-white rounded-lg border border-gray-200 mb-8">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900">Document AI Analysis Results</h2>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Document</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Controls Found</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Avg Confidence</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Upload Date</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {documents.map((doc) => {
+                    const avgConfidence = doc.control_links.length > 0 
+                      ? Math.round(doc.control_links.reduce((sum, link) => sum + link.confidence, 0) / doc.control_links.length * 100)
+                      : 0;
+                    
+                    return (
+                      <tr key={doc.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4">
+                          <div className="text-sm font-medium text-gray-900">{doc.filename}</div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="text-xs text-gray-600">{doc.mime_type}</span>
+                        </td>
+                        <td className="px-6 py-4">
+                          {doc.control_links.length > 0 ? (
+                            <div className="space-y-1">
+                              {doc.control_links.map((link, idx) => (
+                                <span key={idx} className="inline-block px-2 py-1 text-xs font-medium bg-green-100 text-green-800 rounded mr-1">
+                                  {link.control_code} ({Math.round(link.confidence * 100)}%)
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-500">No controls matched</span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4">
+                          {avgConfidence > 0 && (
+                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                              avgConfidence >= 80 ? 'bg-green-100 text-green-800' :
+                              avgConfidence >= 60 ? 'bg-yellow-100 text-yellow-800' : 'bg-orange-100 text-orange-800'
+                            }`}>
+                              {avgConfidence}%
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-sm text-gray-500">
+                          {new Date(doc.created_at).toLocaleDateString()}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Comprehensive AI Analysis Results */}
+        {aiAnalysisResults && (
+          <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg border border-purple-200 mb-8">
+            <div className="px-6 py-4 border-b border-purple-200">
+              <h2 className="text-lg font-semibold text-gray-900">🧠 Comprehensive AI Analysis Report</h2>
+            </div>
+            <div className="p-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-6">
+                <div className="bg-white p-4 rounded-lg border">
+                  <h3 className="font-medium text-gray-900 mb-2">Coverage Analysis</h3>
+                  <div className="text-2xl font-bold text-blue-600">{aiAnalysisResults.coverage_percentage || 0}%</div>
+                  <div className="text-sm text-gray-600">Controls with Evidence</div>
+                </div>
+                <div className="bg-white p-4 rounded-lg border">
+                  <h3 className="font-medium text-gray-900 mb-2">Risk Assessment</h3>
+                  <div className="text-2xl font-bold text-red-600">{aiAnalysisResults.high_risk_gaps || 0}</div>
+                  <div className="text-sm text-gray-600">High Risk Gaps</div>
+                </div>
+                <div className="bg-white p-4 rounded-lg border">
+                  <h3 className="font-medium text-gray-900 mb-2">Evidence Quality</h3>
+                  <div className="text-2xl font-bold text-green-600">{aiAnalysisResults.avg_confidence || 0}%</div>
+                  <div className="text-sm text-gray-600">Average Confidence</div>
+                </div>
+              </div>
+              
+              {aiAnalysisResults.recommendations && (
+                <div className="bg-white p-4 rounded-lg border">
+                  <h3 className="font-medium text-gray-900 mb-3">AI Recommendations</h3>
+                  <div className="space-y-2">
+                    {aiAnalysisResults.recommendations.map((rec: string, idx: number) => (
+                      <div key={idx} className="flex items-start space-x-2">
+                        <span className="text-indigo-600 mt-1">•</span>
+                        <span className="text-sm text-gray-700">{rec}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Controls Table */}
         <div className="bg-white rounded-lg border border-gray-200 mb-8">

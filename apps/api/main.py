@@ -10,6 +10,15 @@ from typing import List, Optional
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from middleware import (
+    ErrorHandlingMiddleware, 
+    SecurityHeadersMiddleware, 
+    RequestValidationMiddleware, 
+    RequestLoggingMiddleware,
+    BusinessLogicError,
+    AIProcessingError,
+    FileProcessingError
+)
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from database import get_db
@@ -436,9 +445,15 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="GeekyGoose Compliance API",
     description="Compliance automation platform for SMB + internal IT teams",
-    version="0.1.0",
+    version="0.3.0",  # Updated version
     lifespan=lifespan
 )
+
+# Add security and error handling middleware (order matters!)
+app.add_middleware(ErrorHandlingMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestValidationMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
 
 # CORS middleware - Allow requests from Next.js container and localhost
 app.add_middleware(
@@ -1550,6 +1565,173 @@ async def download_document(document_id: str, db: Session = Depends(get_db)):
         logger.error(f"Download failed for document {document_id}: {type(e).__name__}: {e}")
         logger.error(f"Document details: filename={document.filename}, storage_key={document.storage_key}")
         raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
+
+@app.post("/reports/comprehensive-analysis")
+async def run_comprehensive_ai_analysis(request: dict, db: Session = Depends(get_db)):
+    """Run comprehensive AI analysis across all documents and controls."""
+    try:
+        framework_id = request.get('framework_id')
+        if not framework_id:
+            raise HTTPException(status_code=400, detail="Framework ID required")
+        
+        logger.info(f"Starting comprehensive AI analysis for framework {framework_id}")
+        
+        # Get all documents (AI processing status determined by control links)
+        documents = db.query(Document).all()
+        
+        # Get all controls for the framework
+        controls = db.query(Control).filter(Control.framework_id == framework_id).all()
+        
+        # Get all document-control links
+        control_links = db.query(DocumentControlLink).all()
+        
+        # Filter documents that have AI processing (have control links)
+        ai_processed_document_ids = set(link.document_id for link in control_links)
+        ai_processed_documents = [doc for doc in documents if doc.id in ai_processed_document_ids]
+        
+        # Calculate comprehensive metrics
+        total_controls = len(controls)
+        controls_with_evidence = len(set(link.control_id for link in control_links))
+        coverage_percentage = round((controls_with_evidence / total_controls * 100) if total_controls > 0 else 0)
+        
+        # Calculate average confidence
+        if control_links:
+            avg_confidence = round(sum(link.confidence for link in control_links) / len(control_links) * 100)
+        else:
+            avg_confidence = 0
+        
+        # Identify high-risk gaps (controls with no evidence or low confidence)
+        high_risk_gaps = 0
+        control_analysis = []
+        
+        for control in controls:
+            control_evidence = [link for link in control_links if link.control_id == control.id]
+            
+            if not control_evidence:
+                high_risk_gaps += 1
+                control_analysis.append({
+                    'control_code': control.code,
+                    'control_title': control.title,
+                    'risk_level': 'HIGH',
+                    'issue': 'No evidence found',
+                    'evidence_count': 0,
+                    'avg_confidence': 0
+                })
+            else:
+                max_confidence = max(link.confidence for link in control_evidence)
+                if max_confidence < 0.6:
+                    high_risk_gaps += 1
+                    control_analysis.append({
+                        'control_code': control.code,
+                        'control_title': control.title,
+                        'risk_level': 'HIGH',
+                        'issue': 'Low confidence evidence',
+                        'evidence_count': len(control_evidence),
+                        'avg_confidence': round(max_confidence * 100)
+                    })
+        
+        # Generate AI recommendations based on analysis
+        recommendations = []
+        
+        if coverage_percentage < 50:
+            recommendations.append("Coverage is below 50%. Consider uploading more compliance documentation.")
+        
+        if avg_confidence < 70:
+            recommendations.append("Average confidence is low. Review evidence quality and ensure documents contain specific compliance details.")
+        
+        if high_risk_gaps > total_controls * 0.3:
+            recommendations.append("High number of gaps detected. Prioritize evidence collection for missing controls.")
+        
+        # Document type analysis
+        document_types = {}
+        for doc in documents:
+            doc_type = doc.mime_type
+            if doc_type not in document_types:
+                document_types[doc_type] = {'count': 0, 'with_links': 0}
+            document_types[doc_type]['count'] += 1
+            if doc.id in ai_processed_document_ids:
+                document_types[doc_type]['with_links'] += 1
+        
+        # Evidence gaps by control
+        missing_controls = [c.code for c in controls if c.id not in [link.control_id for link in control_links]]
+        
+        if missing_controls:
+            recommendations.append(f"Missing evidence for controls: {', '.join(missing_controls[:5])}{'...' if len(missing_controls) > 5 else ''}")
+        
+        if len(ai_processed_documents) < 5:
+            recommendations.append("Consider uploading more supporting documents for comprehensive compliance coverage.")
+        
+        # Run AI analysis on the overall compliance state
+        from ai_scanner import get_ai_client
+        ai_client = get_ai_client()
+        if ai_client and not isinstance(ai_client, dict):
+            try:
+                analysis_prompt = f"""
+                Analyze this compliance state and provide strategic recommendations:
+                
+                Framework: {controls[0].framework.name if controls else 'Unknown'}
+                Total Controls: {total_controls}
+                Coverage: {coverage_percentage}%
+                Documents Analyzed: {len(ai_processed_documents)}
+                Control Links: {len(control_links)}
+                High Risk Gaps: {high_risk_gaps}
+                
+                Missing Controls: {', '.join(missing_controls[:10])}
+                
+                Provide 3-5 specific, actionable recommendations for improving compliance posture.
+                Focus on prioritization and practical next steps.
+                """
+                
+                ai_response = create_chat_completion_safe(
+                    client=ai_client,
+                    model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+                    messages=[
+                        {"role": "system", "content": "You are a compliance expert. Provide concise, actionable recommendations."},
+                        {"role": "user", "content": analysis_prompt}
+                    ],
+                    max_tokens=500,
+                    temperature=0.1
+                )
+                
+                if ai_response and ai_response.choices[0].message.content:
+                    ai_recommendations = ai_response.choices[0].message.content.strip().split('\n')
+                    # Clean and filter AI recommendations
+                    ai_recommendations = [rec.strip('- •').strip() for rec in ai_recommendations if rec.strip() and len(rec.strip()) > 10]
+                    recommendations.extend(ai_recommendations[:5])
+                    
+            except Exception as e:
+                logger.error(f"AI recommendation generation failed: {e}")
+        
+        # Ensure we have at least some recommendations
+        if not recommendations:
+            recommendations = [
+                "Continue monitoring compliance status and uploading relevant documentation.",
+                "Review control requirements and ensure adequate evidence is available.",
+                "Consider conducting periodic compliance assessments."
+            ]
+        
+        result = {
+            'framework_id': framework_id,
+            'analysis_timestamp': datetime.utcnow().isoformat(),
+            'coverage_percentage': coverage_percentage,
+            'total_controls': total_controls,
+            'controls_with_evidence': controls_with_evidence,
+            'total_documents': len(ai_processed_documents),
+            'total_control_links': len(control_links),
+            'avg_confidence': avg_confidence,
+            'high_risk_gaps': high_risk_gaps,
+            'recommendations': recommendations[:8],  # Limit to 8 recommendations
+            'document_types': document_types,
+            'control_analysis': control_analysis[:10],  # Top 10 high-risk controls
+            'missing_controls': missing_controls[:20]  # Top 20 missing controls
+        }
+        
+        logger.info(f"Comprehensive analysis complete: {coverage_percentage}% coverage, {high_risk_gaps} high-risk gaps")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Comprehensive analysis failed: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 @app.get("/documents/{document_id}/ai-status")
 async def get_document_ai_status(document_id: str, db: Session = Depends(get_db)):
