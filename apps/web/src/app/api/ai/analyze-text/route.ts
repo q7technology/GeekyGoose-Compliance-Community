@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function generateMockAIResponse(prompt: string) {
+function generateMockAIResponse(_prompt: string) {
   // Generic mock response - in production this should call a real AI service
   // For now, return empty suggestions to force fallback to the generateFallbackSuggestions function
   const response = JSON.stringify({

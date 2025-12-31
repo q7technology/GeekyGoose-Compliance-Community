@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+interface Control {
+  code: string;
+  title: string;
+  framework: string;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
@@ -10,12 +16,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 });
     }
 
-    const controls = controlsJson ? JSON.parse(controlsJson) : [];
-
-    // Convert file to base64 for AI analysis
-    const arrayBuffer = await file.arrayBuffer();
-    const base64Image = Buffer.from(arrayBuffer).toString('base64');
-    const mimeType = file.type || 'image/png';
+    const controls: Control[] = controlsJson ? JSON.parse(controlsJson) : [];
 
     // Prepare prompt for vision AI
     const visionPrompt = `You are analyzing a screenshot or image for compliance evidence mapping.
@@ -33,7 +34,7 @@ Carefully examine this image and identify what it shows. Look for:
 
 Based on what you see in the image, map it to the most relevant compliance control(s) from this list:
 
-${controls.map((c: any) => `${c.code}: ${c.title} (${c.framework})`).join('\n')}
+${controls.map((c: Control) => `${c.code}: ${c.title} (${c.framework})`).join('\n')}
 
 Provide your analysis in JSON format:
 {
@@ -99,7 +100,7 @@ Be specific about what you see in the image. Limit to top 3 most relevant matche
   }
 }
 
-function generateMockVisionAnalysis(filename: string, controls: any[]) {
+function generateMockVisionAnalysis(filename: string, controls: Control[]) {
   // Enhanced mock that tries to infer from filename
   const suggestions = [];
   const lowerFilename = filename.toLowerCase();
@@ -107,7 +108,7 @@ function generateMockVisionAnalysis(filename: string, controls: any[]) {
   // Pattern matching based on common screenshot naming
   if (lowerFilename.includes('update') || lowerFilename.includes('patch') ||
       lowerFilename.includes('windows') || lowerFilename.includes('system')) {
-    const osControl = controls.find((c: any) => c.code === 'EE-6');
+    const osControl = controls.find((c: Control) => c.code === 'EE-6');
     if (osControl) {
       suggestions.push({
         control_code: osControl.code,
@@ -121,7 +122,7 @@ function generateMockVisionAnalysis(filename: string, controls: any[]) {
 
   if (lowerFilename.includes('office') || lowerFilename.includes('macro') ||
       lowerFilename.includes('excel') || lowerFilename.includes('word')) {
-    const macroControl = controls.find((c: any) => c.code === 'EE-3');
+    const macroControl = controls.find((c: Control) => c.code === 'EE-3');
     if (macroControl) {
       suggestions.push({
         control_code: macroControl.code,
@@ -135,7 +136,7 @@ function generateMockVisionAnalysis(filename: string, controls: any[]) {
 
   if (lowerFilename.includes('mfa') || lowerFilename.includes('2fa') ||
       lowerFilename.includes('auth') || lowerFilename.includes('login')) {
-    const mfaControl = controls.find((c: any) => c.code === 'EE-5');
+    const mfaControl = controls.find((c: Control) => c.code === 'EE-5');
     if (mfaControl) {
       suggestions.push({
         control_code: mfaControl.code,
@@ -149,7 +150,7 @@ function generateMockVisionAnalysis(filename: string, controls: any[]) {
 
   if (lowerFilename.includes('backup') || lowerFilename.includes('restore') ||
       lowerFilename.includes('recovery')) {
-    const backupControl = controls.find((c: any) => c.code === 'EE-7');
+    const backupControl = controls.find((c: Control) => c.code === 'EE-7');
     if (backupControl) {
       suggestions.push({
         control_code: backupControl.code,
@@ -163,7 +164,7 @@ function generateMockVisionAnalysis(filename: string, controls: any[]) {
 
   // If no matches found, default to generic update analysis
   if (suggestions.length === 0) {
-    const defaultControl = controls.find((c: any) => c.code === 'EE-6') || controls[0];
+    const defaultControl = controls.find((c: Control) => c.code === 'EE-6') || controls[0];
     if (defaultControl) {
       suggestions.push({
         control_code: defaultControl.code,
