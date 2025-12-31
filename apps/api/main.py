@@ -8,7 +8,7 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import List, Optional
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, BackgroundTasks
+from fastapi import FastAPI, File, UploadFile, Depends, HTTPException, BackgroundTasks, Form
 from fastapi.middleware.cors import CORSMiddleware
 from middleware import (
     ErrorHandlingMiddleware, 
@@ -53,7 +53,7 @@ def _analyze_document_ollama_two_step(file_text: str, filename: str, available_c
     
     # Step 1: Document Scanning - Create JSON Summary
     scan_prompt = f"""Analyze document: {filename}
-Content: {file_text[:1000]}
+Content: {file_text[:5000]}
 
 Return JSON summary:
 {{"document_type":"screenshot","primary_topic":"main subject","key_content_indicators":["keywords found"],"security_areas":["security domain"],"main_requirements":["core requirement"],"distinguishing_features":"what makes this unique"}}"""
@@ -298,21 +298,36 @@ def _extract_json_content_only(response_text):
     """Extract just the JSON object as a string, no parsing."""
     if not response_text:
         return None
-    
+
     import re
-    
-    # Find the first JSON object in the response
-    json_pattern = r'\{[^{}]*"suggestions"[^{}]*\[[^\]]*\][^{}]*\}'
-    match = re.search(json_pattern, response_text, re.DOTALL)
-    if match:
-        return match.group(0).strip()
-    
-    # Fallback: look for any JSON-like structure
-    json_pattern = r'\{[\s\S]*?\}'
-    match = re.search(json_pattern, response_text, re.DOTALL)
-    if match:
-        return match.group(0).strip()
-    
+
+    # Clean the response first
+    response_text = response_text.strip()
+
+    # If it already looks like valid JSON, return it
+    if response_text.startswith('{') and response_text.endswith('}'):
+        return response_text
+
+    # Try to find the outermost JSON object by counting braces
+    start_idx = response_text.find('{')
+    if start_idx == -1:
+        return None
+
+    brace_count = 0
+    end_idx = start_idx
+
+    for i in range(start_idx, len(response_text)):
+        if response_text[i] == '{':
+            brace_count += 1
+        elif response_text[i] == '}':
+            brace_count -= 1
+            if brace_count == 0:
+                end_idx = i + 1
+                break
+
+    if brace_count == 0 and end_idx > start_idx:
+        return response_text[start_idx:end_idx].strip()
+
     return None
 
 def _extract_json_from_response(response_text):
@@ -727,15 +742,51 @@ async def analyze_file_content_for_controls(file: UploadFile, file_content: byte
 You are a compliance expert. Analyze this document and identify which compliance controls it relates to.
 
 Document: {filename}
-Content: {file_text[:1000]}{'...' if len(file_text) > 1000 else ''}
+Content: {file_text[:5000]}{'...' if len(file_text) > 50000 else ''}
 
 Available compliance controls:
 {controls_context}
 
+⚠️ CRITICAL MAPPING RULES - Follow these EXACTLY:
+
+1. **MACRO/OFFICE SECURITY** = EE-3 ONLY:
+   - If you see: Microsoft Office, Trust Center, macro settings, VBA, macro security, Excel/Word security
+   - Then MUST use: EE-3 "Configure Microsoft Office Macro Settings"
+   - DO NOT use EE-1 or EE-4 for macro content!
+
+2. **OS UPDATES/PATCHES** = EE-6:
+   - Windows Update, OS patches, system updates, firmware updates
+   - Use: EE-6 "Patch Operating Systems"
+
+3. **APP UPDATES** = EE-2:
+   - Application updates, software patches (not OS)
+   - Use: EE-2 "Patch Applications"
+
+4. **AUTHENTICATION** = EE-5:
+   - MFA, 2FA, multi-factor authentication
+   - Use: EE-5 "Multi-Factor Authentication"
+
+5. **BACKUPS** = EE-7:
+   - Backup settings, recovery points
+   - Use: EE-7 "Backup Data"
+
+6. **APP WHITELISTING** = EE-1:
+   - Application whitelisting, AppLocker, execution control
+   - Use: EE-1 "Application Control"
+   - NOT for macro settings!
+
+7. **BROWSER HARDENING** = EE-4:
+   - Browser security, application hardening
+   - Use: EE-4 "User Application Hardening"
+
+8. **ADMIN ACCESS** = EE-8:
+   - Admin restrictions, privileged access
+   - Use: EE-8 "Restrict Admin Privileges"
+
 Analyze the document content and provide the top 3 most relevant controls.
 For each control, provide:
 - control_code: The exact control code
-- control_title: The exact control title  
+- control_title: The exact control title
 - framework_name: The framework name
 - confidence: A number between 0.0 and 1.0
 - reasoning: Brief explanation (1-2 sentences)
@@ -745,7 +796,7 @@ Respond ONLY with valid JSON in this exact format:
   "suggestions": [
     {{
       "control_code": "CONTROL_CODE",
-      "control_title": "Control Title", 
+      "control_title": "Control Title",
       "framework_name": "Framework Name",
       "confidence": 0.8,
       "reasoning": "Brief explanation of why this control is relevant."
@@ -797,7 +848,7 @@ Do not include any text before or after the JSON. Return empty suggestions array
                 
                 # Clear and simple prompt
                 simple_prompt = f"""Analyze document: {filename}
-Content: {file_text[:500] if file_text else 'Filename analysis only'}
+Content: {file_text[:5000] if file_text else 'Filename analysis only'}
 
 Available controls: {[c['code'] for c in available_controls[:3]]}
 
@@ -815,7 +866,7 @@ Respond with JSON only:
                         "stream": False,
                         "options": {
                             "temperature": 0.1,  # Slightly higher for more flexibility
-                            "num_predict": 500,  # Much longer to allow complete JSON
+                            "num_predict": 2000,  # Increased for models with thinking mode
                             "num_ctx": int(os.getenv("OLLAMA_CONTEXT_SIZE", "32768")),
                             "stop": ["\n\n\n"],  # Only stop on triple newlines to allow full JSON
                             "top_p": 0.9,
@@ -829,7 +880,11 @@ Respond with JSON only:
                 
                 if response.status_code == 200:
                     result = response.json()
-                    
+
+                    # Check if response was truncated
+                    if result.get('done_reason') == 'length':
+                        logger.warning(f"⚠️  Ollama response truncated due to token limit for {filename}! Consider increasing num_predict.")
+
                     # Use only generate API response format
                     ai_response = result.get('response', '').strip()
                     logger.info(f"Using generate API response for {filename}")
@@ -931,7 +986,7 @@ Respond with JSON only:
                         # Try with a much simpler approach
                         simple_prompt = f"""You are a JSON API. Analyze '{filename}' and respond ONLY with valid JSON.
 
-Document content: {file_text[:200] if file_text else 'File analysis'}
+Document content: {file_text[:5000] if file_text else 'File analysis'}
 Available controls: {[c['code'] for c in available_controls[:5]]}
 
 Respond with ONLY this JSON structure:
@@ -1316,10 +1371,10 @@ def generate_fallback_suggestions_from_filename(filename: str, available_control
         ('01_application', 'app_control', 'software_control'): ('EE-1', 'Application Control', 0.9),
         # EE-2 Patch Applications
         ('02_patch', 'app_patch', 'application_patch'): ('EE-2', 'Patch Applications', 0.9),
-        # EE-6 Patch Operating Systems  
-        ('06_patch', 'os_patch', 'system_patch'): ('EE-6', 'Patch Operating Systems', 0.9),
+        # EE-6 Patch Operating Systems
+        ('06_patch', 'os_patch', 'system_patch', 'update', 'windows_update', 'os_update'): ('EE-6', 'Patch Operating Systems', 0.9),
         # EE-3 Configure Microsoft Office Macro Settings
-        ('03_macro', 'office_macro', 'macro_settings'): ('EE-3', 'Configure Microsoft Office Macro Settings', 0.9),
+        ('03_macro', 'office_macro', 'macro_settings', 'macro', 'macros', 'marco', 'vba', 'trust_center', 'office_security'): ('EE-3', 'Configure Microsoft Office Macro Settings', 0.9),
         # EE-4 User Application Hardening
         ('04_hardening', 'browser', 'user_app'): ('EE-4', 'User Application Hardening', 0.9),
     }
@@ -2711,12 +2766,163 @@ async def analyze_text_with_ai(request: ControlAnalysisRequest):
             ai_response = response.choices[0].message.content
         
         return {"response": ai_response}
-        
+
     except Exception as e:
         logger.error(f"AI analysis failed: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"AI analysis failed: {str(e)}"
+        )
+
+@app.post("/api/ai/analyze-image")
+async def analyze_image_with_ai(
+    image: UploadFile = File(...),
+    prompt: str = Form(...)
+):
+    """Analyze an image using vision AI and suggest compliance controls."""
+    try:
+        from ai_scanner import get_ai_client
+        import base64
+        from PIL import Image
+        import io
+        import json as json_module
+
+        # Read image content
+        image_content = await image.read()
+
+        # Process image with PIL
+        try:
+            pil_image = Image.open(io.BytesIO(image_content))
+            # Convert to RGB if needed
+            if pil_image.mode != 'RGB':
+                pil_image = pil_image.convert('RGB')
+
+            # Resize if too large
+            max_size = (1024, 1024)
+            if pil_image.size[0] > max_size[0] or pil_image.size[1] > max_size[1]:
+                pil_image.thumbnail(max_size, Image.Resampling.LANCZOS)
+
+            # Convert to bytes
+            img_buffer = io.BytesIO()
+            pil_image.save(img_buffer, format='JPEG', quality=85)
+            processed_content = img_buffer.getvalue()
+        except Exception:
+            processed_content = image_content
+
+        ai_client = get_ai_client()
+
+        if not isinstance(ai_client, dict):  # OpenAI
+            try:
+                image_b64 = base64.b64encode(processed_content).decode('utf-8')
+
+                response = ai_client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": prompt
+                                },
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:image/jpeg;base64,{image_b64}",
+                                        "detail": "high"
+                                    }
+                                }
+                            ]
+                        }
+                    ],
+                    max_tokens=2000
+                )
+
+                ai_response = response.choices[0].message.content
+                logger.info(f"Vision AI analysis complete for {image.filename}")
+
+                return {"response": ai_response}
+
+            except Exception as e:
+                logger.warning(f"Vision AI failed for {image.filename}: {e}")
+                # Fallback to OCR
+                import pytesseract
+                ocr_text = pytesseract.image_to_string(Image.open(io.BytesIO(image_content)))
+
+                if ocr_text.strip():
+                    # Analyze OCR text with the prompt
+                    response = ai_client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": f"{prompt}\n\nExtracted text from image:\n{ocr_text[:3000]}"
+                            }
+                        ],
+                        max_tokens=2000
+                    )
+                    ai_response = response.choices[0].message.content
+                    return {"response": ai_response}
+                else:
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Could not extract text from image"
+                    )
+        else:  # Ollama
+            # Use OCR for Ollama
+            import pytesseract
+            ocr_text = pytesseract.image_to_string(Image.open(io.BytesIO(image_content)))
+
+            if not ocr_text.strip():
+                raise HTTPException(
+                    status_code=500,
+                    detail="Could not extract text from image with OCR"
+                )
+
+            # Analyze OCR text with Ollama
+            import requests
+            endpoint = ai_client['endpoint']
+            model = ai_client['model']
+
+            analysis_prompt = f"{prompt}\n\nExtracted text from image:\n{ocr_text[:3000]}"
+
+            response = requests.post(
+                f"{endpoint}/api/generate",
+                json={
+                    "model": model,
+                    "prompt": analysis_prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.3,
+                        "num_predict": 2000,
+                        "num_ctx": int(os.getenv("OLLAMA_CONTEXT_SIZE", "32768"))
+                    }
+                },
+                timeout=120
+            )
+
+            if response.status_code != 200:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Ollama API error: {response.status_code}"
+                )
+
+            result = response.json()
+            ai_response = result.get('response', '')
+
+            if not ai_response and 'thinking' in result:
+                ai_response = result.get('thinking', '')
+
+            logger.info(f"OCR + Ollama analysis complete for {image.filename}")
+            return {"response": ai_response}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Image analysis failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Image analysis failed: {str(e)}"
         )
 
 @app.post("/analyze-documents")
@@ -2994,7 +3200,7 @@ async def analyze_document_controls(
 Analyze this document and determine which compliance controls it might relate to:
 
 Document: {file.filename}
-Content preview: {file_text[:500]}{'...' if len(file_text) > 500 else ''}
+Content preview: {file_text[:5000]}{'...' if len(file_text) > 5000 else ''}
 
 Available compliance controls:
 {controls_context}
@@ -3043,7 +3249,7 @@ Do not include any text before or after the JSON. Do not use markdown formatting
                     "stream": False,
                     "options": {
                         "temperature": 0.3,
-                        "num_predict": 500,
+                        "num_predict": 2000,
                         "num_ctx": int(os.getenv("OLLAMA_CONTEXT_SIZE", "32768"))
                     }
                 },

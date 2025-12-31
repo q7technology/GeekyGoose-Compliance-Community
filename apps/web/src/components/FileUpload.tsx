@@ -334,19 +334,9 @@ export default function FileUpload({ onUploadComplete, enableControlMapping = fa
   
   const analyzeDocumentWithAI = async (file: File, templates: Template[]) => {
     try {
-      // Read file content for analysis (for text files)
-      let fileContent = ''
       // Extract just the filename without the path
       const filename = file.name.split('\\').pop()?.split('/').pop()?.toLowerCase() || file.name.toLowerCase()
-      
-      if (file.type === 'text/plain' || filename.endsWith('.txt')) {
-        try {
-          fileContent = await file.text()
-        } catch (error) {
-          console.log('Could not read file content, using filename analysis only')
-        }
-      }
-      
+
       // Prepare control context for AI
       const controlsContext = templates.map(t => ({
         code: t.control.code,
@@ -356,9 +346,54 @@ export default function FileUpload({ onUploadComplete, enableControlMapping = fa
         evidence_types: t.evidence_requirements.map(req => req.evidence_type).join(', '),
         evidence_descriptions: t.evidence_requirements.map(req => req.description).join(' | ')
       }))
-      
-      // Create AI analysis prompt
-      const analysisPrompt = `
+
+      // Check if file is an image that needs vision analysis
+      const isImage = file.type.startsWith('image/') || /\.(png|jpg|jpeg|gif|bmp|webp)$/i.test(filename)
+
+      if (isImage) {
+        // Send image file for vision AI analysis
+        const formData = new FormData()
+        formData.append('file', file)
+        formData.append('controls', JSON.stringify(controlsContext))
+
+        const response = await fetch('/api/ai/analyze-image', {
+          method: 'POST',
+          body: formData
+        })
+
+        if (response.ok) {
+          const result = await response.json()
+
+          try {
+            // Parse AI response
+            const aiResponse = typeof result.response === 'string' ? JSON.parse(result.response) : result.response
+            if (aiResponse.suggestions && Array.isArray(aiResponse.suggestions)) {
+              return aiResponse.suggestions.map((s: any) => ({
+                control_code: s.control_code || '',
+                control_title: s.control_title || '',
+                framework_name: s.framework_name || '',
+                confidence: Math.min(Math.max(s.confidence || 0, 0), 1),
+                reasoning: s.reasoning || 'AI-generated suggestion based on image content'
+              }))
+            }
+          } catch (parseError) {
+            console.error('Failed to parse AI vision response:', parseError)
+          }
+        }
+      } else {
+        // Handle text files and documents
+        let fileContent = ''
+
+        if (file.type === 'text/plain' || filename.endsWith('.txt')) {
+          try {
+            fileContent = await file.text()
+          } catch (error) {
+            console.log('Could not read file content, using filename analysis only')
+          }
+        }
+
+        // Create AI analysis prompt for text
+        const analysisPrompt = `
 Analyze the following document and determine which compliance controls it might relate to.
 
 Document filename: ${filename}
@@ -375,40 +410,41 @@ For each relevant control, provide:
 
 Respond in JSON format with a "suggestions" array containing objects with: control_code, control_title, framework_name, confidence, reasoning.
 Limit to the top 3 most relevant matches. If no relevant matches, return empty array.`
-      
-      // Call AI service using configured settings
-      const response = await fetch('/api/ai/analyze-text', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          prompt: analysisPrompt,
-          max_tokens: 1000,
-          temperature: 0.3
+
+        // Call AI service for text analysis
+        const response = await fetch('/api/ai/analyze-text', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            prompt: analysisPrompt,
+            max_tokens: 1000,
+            temperature: 0.3
+          })
         })
-      })
-      
-      if (response.ok) {
-        const result = await response.json()
-        
-        try {
-          // Try to parse AI response as JSON
-          const aiResponse = JSON.parse(result.response)
-          if (aiResponse.suggestions && Array.isArray(aiResponse.suggestions)) {
-            return aiResponse.suggestions.map((s: any) => ({
-              control_code: s.control_code || '',
-              control_title: s.control_title || '',
-              framework_name: s.framework_name || '',
-              confidence: Math.min(Math.max(s.confidence || 0, 0), 1),
-              reasoning: s.reasoning || 'AI-generated suggestion'
-            }))
+
+        if (response.ok) {
+          const result = await response.json()
+
+          try {
+            // Try to parse AI response as JSON
+            const aiResponse = JSON.parse(result.response)
+            if (aiResponse.suggestions && Array.isArray(aiResponse.suggestions)) {
+              return aiResponse.suggestions.map((s: any) => ({
+                control_code: s.control_code || '',
+                control_title: s.control_title || '',
+                framework_name: s.framework_name || '',
+                confidence: Math.min(Math.max(s.confidence || 0, 0), 1),
+                reasoning: s.reasoning || 'AI-generated suggestion'
+              }))
+            }
+          } catch (parseError) {
+            console.error('Failed to parse AI response:', parseError)
           }
-        } catch (parseError) {
-          console.error('Failed to parse AI response:', parseError)
         }
       }
-      
+
       // Fallback to filename-based analysis if AI fails
       return generateFallbackSuggestions(filename, templates)
       
