@@ -43,7 +43,7 @@ beautifulsoup4==4.12.3  # For HTML content extraction
 lxml==5.3.0  # XML/HTML parsing for document extraction
 
 # HTTP and networking
-requests==2.32.3
+requests==2.32.4
 httpx==0.28.1  # Modern HTTP client for async operations
 
 # Security updates - Pinned by Snyk
