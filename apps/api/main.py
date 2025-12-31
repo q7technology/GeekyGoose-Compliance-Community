@@ -2204,6 +2204,7 @@ class AISettingsRequest(BaseModel):
     openai_endpoint: Optional[str] = None
     ollama_endpoint: Optional[str] = 'http://localhost:11434'
     ollama_model: Optional[str] = 'llama2'
+    ollama_context_size: Optional[int] = 32768
 
 @app.get("/settings/ai")
 async def get_ai_settings():
@@ -2214,6 +2215,7 @@ async def get_ai_settings():
         "openai_endpoint": os.getenv("OPENAI_ENDPOINT"),
         "ollama_endpoint": os.getenv("OLLAMA_ENDPOINT", "http://localhost:11434"),
         "ollama_model": os.getenv("OLLAMA_MODEL", "llama2"),
+        "ollama_context_size": int(os.getenv("OLLAMA_CONTEXT_SIZE", "32768")),
         # Don't return API key for security
         "openai_api_key": "***" if os.getenv("OPENAI_API_KEY") else None
     }
@@ -2240,7 +2242,9 @@ async def save_ai_settings(settings: AISettingsRequest):
             os.environ["OLLAMA_ENDPOINT"] = settings.ollama_endpoint
         if settings.ollama_model:
             os.environ["OLLAMA_MODEL"] = settings.ollama_model
-    
+        if settings.ollama_context_size is not None:
+            os.environ["OLLAMA_CONTEXT_SIZE"] = str(settings.ollama_context_size)
+
     return {"message": "Settings saved successfully"}
 
 @app.post("/settings/ai/test")

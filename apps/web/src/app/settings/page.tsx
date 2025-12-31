@@ -10,6 +10,7 @@ interface AISettings {
   openai_endpoint?: string;
   ollama_endpoint?: string;
   ollama_model?: string;
+  ollama_context_size?: number;
 }
 
 export default function SettingsPage() {
@@ -17,7 +18,8 @@ export default function SettingsPage() {
     provider: 'openai',
     openai_model: 'gpt-4o-mini',
     ollama_endpoint: 'http://172.16.0.11:11434',
-    ollama_model: 'llama2'
+    ollama_model: 'llama2',
+    ollama_context_size: 32768
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -457,6 +459,31 @@ export default function SettingsPage() {
                       </p>
                     )}
                   </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Context Size: {(settings.ollama_context_size || 32768).toLocaleString()} tokens
+                  </label>
+                  <input
+                    type="range"
+                    min="4096"
+                    max="131072"
+                    step="4096"
+                    value={settings.ollama_context_size || 32768}
+                    onChange={(e) => setSettings({ ...settings, ollama_context_size: parseInt(e.target.value) })}
+                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                  />
+                  <div className="flex justify-between text-xs text-gray-500 mt-1">
+                    <span>4K</span>
+                    <span>32K</span>
+                    <span>64K</span>
+                    <span>128K</span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-2">
+                    Context window size for the model. Larger values allow processing longer documents but require more memory.
+                    GPT-oss models support up to 128K tokens.
+                  </p>
                 </div>
 
                 <div className="bg-blue-50 p-3 rounded-lg">
