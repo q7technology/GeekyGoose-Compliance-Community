@@ -12,6 +12,10 @@ on:
       - 'apps/web/**'
       - '.github/workflows/frontend-test.yml'
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   test:
     name: Test Frontend

@@ -12,6 +12,9 @@ on:
       - 'apps/api/**'
       - '.github/workflows/backend-test.yml'
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Test Backend
