@@ -165,19 +165,23 @@ CREATE TABLE IF NOT EXISTS settings (
     id INTEGER PRIMARY KEY DEFAULT 1,
     ai_provider VARCHAR(50) DEFAULT 'ollama',
     openai_api_key VARCHAR(500),
-    openai_model VARCHAR(100) DEFAULT 'gpt-4o-mini',
+    openai_model VARCHAR(100) DEFAULT 'gpt-4o',
     openai_endpoint VARCHAR(500),
+    openai_vision_model VARCHAR(100) DEFAULT 'gpt-4o',
     ollama_endpoint VARCHAR(500) DEFAULT 'http://host.docker.internal:11434',
     ollama_model VARCHAR(100) DEFAULT 'qwen2.5:14b',
+    ollama_vision_model VARCHAR(100) DEFAULT 'qwen2-vl',
     ollama_context_size INTEGER DEFAULT 131072,
+    min_confidence_threshold REAL DEFAULT 0.90,
+    use_dual_vision_validation BOOLEAN DEFAULT false,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     CONSTRAINT single_settings_row CHECK (id = 1)
 );
 
 -- Insert default settings if table is empty
-INSERT INTO settings (id, ai_provider, ollama_endpoint, ollama_model, ollama_context_size)
-VALUES (1, 'ollama', 'http://host.docker.internal:11434', 'qwen2.5:14b', 131072)
+INSERT INTO settings (id, ai_provider, openai_model, openai_vision_model, ollama_endpoint, ollama_model, ollama_vision_model, ollama_context_size, min_confidence_threshold)
+VALUES (1, 'ollama', 'gpt-4o', 'gpt-4o', 'http://host.docker.internal:11434', 'qwen2.5:14b', 'qwen2-vl', 131072, 0.90)
 ON CONFLICT (id) DO NOTHING;
 
 -- Indexes for performance (only create if they don't exist)

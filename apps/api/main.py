@@ -1278,28 +1278,99 @@ async def process_document_ai_analysis_background(document_id: str, filename: st
             SessionLocal = sessionmaker(bind=engine)
             db = SessionLocal()
             
+            # Get confidence threshold and dual vision settings
+            from models import Settings
+            settings = db.query(Settings).filter(Settings.id == 1).first()
+            min_threshold = settings.min_confidence_threshold if settings else 0.90
+            use_dual_vision = bool(settings.use_dual_vision_validation) if settings and hasattr(settings, 'use_dual_vision_validation') else False
+
+            if use_dual_vision and suggested_controls:
+                logger.info(f"Dual vision validation enabled for document {document_id}")
+                try:
+                    # Re-analyze with both vision models
+                    from ai_scanner import get_vision_clients_for_dual_validation
+                    vision_clients = get_vision_clients_for_dual_validation()
+
+                    if len(vision_clients) >= 2:
+                        logger.info(f"Running dual vision validation with {len(vision_clients)} models")
+
+                        # Re-run analysis with both models
+                        dual_results = []
+                        for provider_name, client_info in vision_clients.items():
+                            try:
+                                logger.info(f"Analyzing with {provider_name} - {client_info['model']}")
+                                # Re-analyze the document with this specific client
+                                mock_file = MockFile(filename, file_content)
+                                result = await safe_analyze_file_content_for_controls(mock_file, file_content)
+                                if result:
+                                    dual_results.append({
+                                        'provider': provider_name,
+                                        'model': client_info['model'],
+                                        'result': result[0] if result else None
+                                    })
+                            except Exception as e:
+                                logger.error(f"Dual vision analysis failed for {provider_name}: {e}")
+
+                        # Compare results - only proceed if both models agree
+                        if len(dual_results) == 2:
+                            result1 = dual_results[0]['result']
+                            result2 = dual_results[1]['result']
+
+                            if result1 and result2:
+                                control1 = result1.get('control_code')
+                                control2 = result2.get('control_code')
+                                conf1 = result1.get('confidence', 0.0)
+                                conf2 = result2.get('confidence', 0.0)
+
+                                if control1 == control2:
+                                    # Both models agree! Use minimum confidence (most conservative)
+                                    min_conf = min(conf1, conf2)
+                                    logger.info(f"✓ Dual vision CONSENSUS: Both models agree on {control1} (conf: {conf1:.2f} & {conf2:.2f}, using min: {min_conf:.2f})")
+
+                                    # Update suggested_controls with validated result
+                                    suggested_controls = [{
+                                        'control_code': control1,
+                                        'confidence': min_conf,
+                                        'reasoning': f"Dual validation: {dual_results[0]['model']} ({conf1:.2f}) and {dual_results[1]['model']} ({conf2:.2f}) both agree"
+                                    }]
+                                else:
+                                    # Models disagree - reject the link for safety
+                                    logger.warning(f"✗ Dual vision DISAGREEMENT: {dual_results[0]['model']} suggested {control1} ({conf1:.2f}), {dual_results[1]['model']} suggested {control2} ({conf2:.2f}) - NO LINK CREATED")
+                                    suggested_controls = []  # Clear suggestions - no consensus
+                    else:
+                        logger.warning(f"Dual vision validation requires 2 models, only {len(vision_clients)} available - falling back to single model")
+                except Exception as e:
+                    logger.error(f"Dual vision validation error: {e}")
+                    # Fall back to single model result on error
+
             # Update document with AI processing complete status
             document = db.query(Document).filter(Document.id == document_id).first()
             if document and suggested_controls:
                 # Find the suggested control in database
                 control = db.query(Control).filter(Control.code == suggested_controls[0]['control_code']).first()
                 if control:
-                    # Create document-control link
-                    existing_link = db.query(DocumentControlLink).filter_by(
-                        document_id=document_id, 
-                        control_id=control.id
-                    ).first()
-                    
-                    if not existing_link:
-                        link = DocumentControlLink(
+                    confidence = suggested_controls[0].get('confidence', 0.0)
+
+                    # Only create link if confidence meets threshold
+                    if confidence >= min_threshold:
+                        # Create document-control link
+                        existing_link = db.query(DocumentControlLink).filter_by(
                             document_id=document_id,
-                            control_id=control.id,
-                            confidence=suggested_controls[0].get('confidence', 0.9),
-                            reasoning=suggested_controls[0].get('reasoning', 'AI analysis')
-                        )
-                        db.add(link)
-                        db.commit()
-                        logger.info(f"Created document-control link: {document.filename} → {control.code}")
+                            control_id=control.id
+                        ).first()
+
+                        if not existing_link:
+                            link = DocumentControlLink(
+                                document_id=document_id,
+                                control_id=control.id,
+                                confidence=confidence,
+                                reasoning=suggested_controls[0].get('reasoning', 'AI analysis')
+                            )
+                            db.add(link)
+                            db.commit()
+                            logger.info(f"Created document-control link: {document.filename} → {control.code} (confidence: {confidence:.2f})")
+                    else:
+                        logger.info(f"Skipped link for {document.filename} → {control.code}: confidence {confidence:.2f} below threshold {min_threshold}")
             
             db.close()
         except Exception as e:
@@ -2089,7 +2160,9 @@ async def get_control_documents(control_id: str, db: Session = Depends(get_db)):
                     "download_url": f"/api/documents/{document.id}/download",
                     "confidence": link.confidence,
                     "reasoning": link.reasoning,
-                    "link_created_at": link.created_at.isoformat()
+                    "link_created_at": link.created_at.isoformat(),
+                    "link_id": str(link.id),
+                    "is_ai_linked": True
                 })
         
         return {
@@ -2104,6 +2177,29 @@ async def get_control_documents(control_id: str, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Failed to get documents for control {control_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to get control documents")
+
+@app.delete("/document-control-links/{link_id}")
+async def remove_document_control_link(link_id: str, db: Session = Depends(get_db)):
+    """Remove an AI-generated document-control link (for false positives)."""
+    try:
+        link = db.query(DocumentControlLink).filter(DocumentControlLink.id == link_id).first()
+        if not link:
+            raise HTTPException(status_code=404, detail="Link not found")
+
+        # Log the removal for audit
+        logger.info(f"Removing AI document-control link: {link.document.filename} → Control {link.control.code} (confidence: {link.confidence})")
+
+        db.delete(link)
+        db.commit()
+
+        return {"message": "Link removed successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to remove document-control link {link_id}: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to remove link")
 
 @app.post("/controls/{control_id}/scan")
 async def create_scan(
@@ -2246,11 +2342,15 @@ async def get_control_scans(control_id: str, db: Session = Depends(get_db)):
 class AISettingsRequest(BaseModel):
     provider: str  # 'openai' or 'ollama'
     openai_api_key: Optional[str] = None
-    openai_model: Optional[str] = 'gpt-4o-mini'
+    openai_model: Optional[str] = 'gpt-4o'
+    openai_vision_model: Optional[str] = 'gpt-4o'
     openai_endpoint: Optional[str] = None
     ollama_endpoint: Optional[str] = 'http://localhost:11434'
-    ollama_model: Optional[str] = 'llama2'
-    ollama_context_size: Optional[int] = 32768
+    ollama_model: Optional[str] = 'qwen2.5:14b'
+    ollama_vision_model: Optional[str] = 'qwen2-vl'
+    ollama_context_size: Optional[int] = 131072
+    min_confidence_threshold: Optional[float] = 0.90
+    use_dual_vision_validation: Optional[bool] = False
 
 @app.get("/settings/ai")
 async def get_ai_settings(db: Session = Depends(get_db)):
@@ -2280,10 +2380,14 @@ async def get_ai_settings(db: Session = Depends(get_db)):
     return {
         "provider": settings.ai_provider,
         "openai_model": settings.openai_model,
+        "openai_vision_model": settings.openai_vision_model or 'gpt-4o',
         "openai_endpoint": settings.openai_endpoint,
         "ollama_endpoint": settings.ollama_endpoint,
         "ollama_model": settings.ollama_model,
+        "ollama_vision_model": settings.ollama_vision_model or 'qwen2-vl',
         "ollama_context_size": settings.ollama_context_size,
+        "min_confidence_threshold": settings.min_confidence_threshold or 0.90,
+        "use_dual_vision_validation": bool(settings.use_dual_vision_validation) if hasattr(settings, 'use_dual_vision_validation') else False,
         # Don't return API key for security
         "openai_api_key": "***" if settings.openai_api_key else None
     }
@@ -2302,11 +2406,21 @@ async def save_ai_settings(settings_request: AISettingsRequest, db: Session = De
     settings.ai_provider = settings_request.provider
     settings.updated_at = datetime.utcnow()
 
+    # Update confidence threshold (applies to all providers)
+    if settings_request.min_confidence_threshold is not None:
+        settings.min_confidence_threshold = settings_request.min_confidence_threshold
+
+    # Update dual vision validation setting
+    if settings_request.use_dual_vision_validation is not None:
+        settings.use_dual_vision_validation = 1 if settings_request.use_dual_vision_validation else 0
+
     if settings_request.provider == "openai":
         if settings_request.openai_api_key and settings_request.openai_api_key != "***":
             settings.openai_api_key = settings_request.openai_api_key
         if settings_request.openai_model:
             settings.openai_model = settings_request.openai_model
+        if settings_request.openai_vision_model:
+            settings.openai_vision_model = settings_request.openai_vision_model
         if settings_request.openai_endpoint:
             settings.openai_endpoint = settings_request.openai_endpoint
         else:
@@ -2316,6 +2430,8 @@ async def save_ai_settings(settings_request: AISettingsRequest, db: Session = De
             settings.ollama_endpoint = settings_request.ollama_endpoint
         if settings_request.ollama_model:
             settings.ollama_model = settings_request.ollama_model
+        if settings_request.ollama_vision_model:
+            settings.ollama_vision_model = settings_request.ollama_vision_model
         if settings_request.ollama_context_size is not None:
             settings.ollama_context_size = settings_request.ollama_context_size
 

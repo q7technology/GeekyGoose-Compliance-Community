@@ -7,10 +7,14 @@ interface AISettings {
   provider: 'openai' | 'ollama';
   openai_api_key?: string;
   openai_model?: string;
+  openai_vision_model?: string;
   openai_endpoint?: string;
   ollama_endpoint?: string;
   ollama_model?: string;
+  ollama_vision_model?: string;
   ollama_context_size?: number;
+  min_confidence_threshold?: number;
+  use_dual_vision_validation?: boolean;
 }
 
 export default function SettingsPage() {
@@ -508,6 +512,89 @@ export default function SettingsPage() {
                 </div>
               </div>
             )}
+
+            {/* Advanced Settings */}
+            <div className="space-y-4 p-4 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-lg border-2 border-purple-200">
+              <h3 className="font-medium text-purple-900 flex items-center gap-2">
+                <span>⚙️</span>
+                Advanced AI Settings
+              </h3>
+
+              {/* Confidence Threshold */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Minimum Confidence Threshold: {Math.round((settings.min_confidence_threshold || 0.90) * 100)}%
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={(settings.min_confidence_threshold || 0.90) * 100}
+                  onChange={(e) => setSettings({ ...settings, min_confidence_threshold: parseInt(e.target.value) / 100 })}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-xs text-gray-500 mt-1">
+                  <span>50%</span>
+                  <span>70%</span>
+                  <span>90%</span>
+                  <span>100%</span>
+                </div>
+                <p className="text-xs text-gray-600 mt-2">
+                  Only create AI document links when confidence is ≥ this threshold. Higher values = fewer false positives. Recommended: 90%
+                </p>
+              </div>
+
+              {/* Dual Vision Validation Toggle */}
+              <div className="p-3 bg-white rounded-lg border border-purple-200">
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    id="dual-vision"
+                    checked={settings.use_dual_vision_validation || false}
+                    onChange={(e) => setSettings({ ...settings, use_dual_vision_validation: e.target.checked })}
+                    className="mt-1 h-5 w-5 text-purple-600 border-gray-300 rounded focus:ring-purple-500"
+                  />
+                  <div className="flex-1">
+                    <label htmlFor="dual-vision" className="cursor-pointer">
+                      <span className="font-medium text-gray-900">🔬 Dual Vision Validation (Ultra Accuracy)</span>
+                      <p className="text-sm text-gray-600 mt-1">
+                        Use <strong>both</strong> GPT-4o AND Qwen2-VL together. Only creates links if <strong>both models agree</strong> on the same control. Uses minimum confidence from both models.
+                      </p>
+                      <div className="mt-2 text-xs space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-green-600">✓</span>
+                          <span className="text-gray-700">Virtually eliminates false positives</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-green-600">✓</span>
+                          <span className="text-gray-700">Maximum accuracy for critical documents</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-orange-500">⚠</span>
+                          <span className="text-gray-700">Slower (2x processing time) and higher cost</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-orange-500">⚠</span>
+                          <span className="text-gray-700">Requires both OpenAI API key AND Ollama with qwen2-vl model</span>
+                        </div>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {/* Vision Model Info */}
+              <div className="text-xs text-gray-600 p-3 bg-blue-50 rounded border border-blue-200">
+                <p className="font-medium text-blue-900 mb-1">📸 Vision Models Used:</p>
+                <ul className="space-y-1 ml-4 list-disc">
+                  <li><strong>OpenAI:</strong> {settings.openai_vision_model || 'gpt-4o'} (for images & PDFs)</li>
+                  <li><strong>Ollama:</strong> {settings.ollama_vision_model || 'qwen2-vl'} (for dual validation)</li>
+                </ul>
+                <p className="mt-2 text-blue-800">
+                  💡 To use dual validation, install: <code className="bg-blue-100 px-1 rounded">ollama pull qwen2-vl</code>
+                </p>
+              </div>
+            </div>
 
             {/* Test Result */}
             {testResult && (

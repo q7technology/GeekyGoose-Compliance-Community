@@ -31,6 +31,7 @@ interface LinkedDocument {
   confidence: number;
   reasoning: string;
   link_created_at: string;
+  link_id?: string;
   is_ai_linked?: boolean;
 }
 
@@ -38,21 +39,44 @@ function LinkedDocuments({ controlId }: { controlId: string }) {
   const [documents, setDocuments] = useState<LinkedDocument[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const fetchDocuments = async () => {
-      try {
-        const response = await fetch(`/api/controls/${controlId}/documents`);
-        if (response.ok) {
-          const data = await response.json();
-          setDocuments(data.documents);
-        }
-      } catch (error) {
-        console.error('Failed to fetch linked documents:', error);
-      } finally {
-        setLoading(false);
+  const fetchDocuments = async () => {
+    try {
+      const response = await fetch(`/api/controls/${controlId}/documents`);
+      if (response.ok) {
+        const data = await response.json();
+        setDocuments(data.documents);
       }
-    };
+    } catch (error) {
+      console.error('Failed to fetch linked documents:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  const removeLink = async (linkId: string, filename: string) => {
+    if (!confirm(`Remove AI link for "${filename}"?\n\nThis will unlink the document from this control.`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/document-control-links/${linkId}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        // Refresh documents list
+        await fetchDocuments();
+        alert('Link removed successfully');
+      } else {
+        throw new Error('Failed to remove link');
+      }
+    } catch (error) {
+      console.error('Failed to remove link:', error);
+      alert('Failed to remove link. Please try again.');
+    }
+  };
+
+  useEffect(() => {
     fetchDocuments();
   }, [controlId]);
 
@@ -75,26 +99,47 @@ function LinkedDocuments({ controlId }: { controlId: string }) {
         <div>
           <div className="text-xs font-medium text-blue-700 mb-1">🤖 AI-Linked:</div>
           <div className="space-y-1">
-            {aiLinked.slice(0, 3).map((doc) => (
-              <div key={doc.id} className="flex items-center justify-between text-xs">
-                <div className="flex items-center space-x-1 flex-1 min-w-0">
-                  <span className="text-blue-700 truncate" title={doc.filename}>
-                    📄 {doc.filename.split('/').pop()}
-                  </span>
-                  <div className={`w-1.5 h-1.5 rounded-full ${
-                    doc.confidence >= 0.7 ? 'bg-green-500' :
-                    doc.confidence >= 0.4 ? 'bg-yellow-500' : 'bg-orange-500'
-                  }`} title={`Confidence: ${Math.round(doc.confidence * 100)}%`}></div>
+            {aiLinked.slice(0, 3).map((doc) => {
+              const confidencePercent = Math.round(doc.confidence * 100);
+              const isLowConfidence = doc.confidence < 0.90;
+
+              return (
+                <div key={doc.id} className="flex items-center justify-between text-xs gap-1">
+                  <div className="flex items-center space-x-1 flex-1 min-w-0">
+                    <span className="text-blue-700 truncate" title={doc.filename}>
+                      📄 {doc.filename.split('/').pop()}
+                    </span>
+                    <div className={`w-1.5 h-1.5 rounded-full ${
+                      doc.confidence >= 0.90 ? 'bg-green-500' :
+                      doc.confidence >= 0.70 ? 'bg-yellow-500' : 'bg-red-500'
+                    }`} title={`Confidence: ${confidencePercent}%`}></div>
+                    {isLowConfidence && (
+                      <span className="text-xs bg-red-100 text-red-700 px-1 rounded" title="Low confidence - may be incorrect">
+                        ⚠️ {confidencePercent}%
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <a
+                      href={doc.download_url}
+                      className="text-blue-600 hover:text-blue-800"
+                      title="Download"
+                    >
+                      ⬇
+                    </a>
+                    {doc.link_id && (
+                      <button
+                        onClick={() => removeLink(doc.link_id!, doc.filename)}
+                        className="text-red-600 hover:text-red-800"
+                        title="Remove AI link (false positive)"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <a
-                  href={doc.download_url}
-                  className="text-blue-600 hover:text-blue-800 ml-1"
-                  title="Download"
-                >
-                  ⬇
-                </a>
-              </div>
-            ))}
+              );
+            })}
             {aiLinked.length > 3 && (
               <div className="text-xs text-blue-600">
                 +{aiLinked.length - 3} more

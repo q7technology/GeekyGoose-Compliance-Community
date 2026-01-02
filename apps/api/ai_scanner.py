@@ -39,6 +39,55 @@ def create_chat_completion_safe(client, model, messages, temperature=None):
 # Initialize OpenAI client lazily
 client = None
 
+def get_vision_clients_for_dual_validation():
+    """Get both OpenAI and Ollama vision clients for dual validation."""
+    db = SessionLocal()
+    try:
+        settings = db.query(Settings).filter(Settings.id == 1).first()
+        if not settings:
+            raise ValueError("No settings found in database")
+
+        clients = {}
+
+        # Get OpenAI GPT-4o client
+        if settings.openai_api_key:
+            try:
+                from openai import OpenAI
+                clients['openai'] = {
+                    'client': OpenAI(
+                        api_key=settings.openai_api_key,
+                        base_url=settings.openai_endpoint
+                    ),
+                    'model': settings.openai_vision_model or 'gpt-4o',
+                    'type': 'openai'
+                }
+                logger.info(f"Initialized OpenAI vision client with model {clients['openai']['model']}")
+            except Exception as e:
+                logger.error(f"Failed to initialize OpenAI vision client: {e}")
+
+        # Get Ollama Qwen2-VL client
+        if settings.ollama_endpoint:
+            try:
+                import requests
+                endpoint = settings.ollama_endpoint
+                model = settings.ollama_vision_model or 'qwen2-vl'
+
+                # Test connection
+                response = requests.get(f"{endpoint}/api/tags", timeout=5)
+                if response.status_code == 200:
+                    clients['ollama'] = {
+                        'endpoint': endpoint,
+                        'model': model,
+                        'type': 'ollama'
+                    }
+                    logger.info(f"Initialized Ollama vision client with model {model}")
+            except Exception as e:
+                logger.error(f"Failed to initialize Ollama vision client: {e}")
+
+        return clients
+    finally:
+        db.close()
+
 def get_ai_client():
     """Get AI client based on configured provider from database."""
     db = SessionLocal()
