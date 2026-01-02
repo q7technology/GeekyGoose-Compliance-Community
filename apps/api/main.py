@@ -2182,6 +2182,10 @@ async def get_scan_status(scan_id: str, db: Session = Depends(get_db)):
         "status": scan.status,
         "model": scan.model,
         "prompt_version": scan.prompt_version,
+        "progress_percentage": scan.progress_percentage or 0,
+        "current_step": scan.current_step or 'Initializing...',
+        "total_requirements": scan.total_requirements or 0,
+        "processed_requirements": scan.processed_requirements or 0,
         "created_at": scan.created_at.isoformat(),
         "updated_at": scan.updated_at.isoformat(),
         "results": [
@@ -2228,6 +2232,10 @@ async def get_control_scans(control_id: str, db: Session = Depends(get_db)):
                 "status": scan.status,
                 "model": scan.model,
                 "prompt_version": scan.prompt_version,
+                "progress_percentage": scan.progress_percentage or 0,
+                "current_step": scan.current_step or 'Initializing...',
+                "total_requirements": scan.total_requirements or 0,
+                "processed_requirements": scan.processed_requirements or 0,
                 "created_at": scan.created_at.isoformat()
             }
             for scan in scans
@@ -2715,6 +2723,10 @@ async def get_control_scans(control_id: str):
                 "status": scan.status,
                 "model": scan.model,
                 "prompt_version": scan.prompt_version,
+                "progress_percentage": scan.progress_percentage or 0,
+                "current_step": scan.current_step or 'Initializing...',
+                "total_requirements": scan.total_requirements or 0,
+                "processed_requirements": scan.processed_requirements or 0,
                 "created_at": scan.created_at.isoformat(),
                 "updated_at": scan.updated_at.isoformat()
             })

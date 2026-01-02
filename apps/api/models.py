@@ -158,16 +158,20 @@ class DocumentControlLink(Base):
 
 class Scan(Base):
     __tablename__ = "scans"
-    
+
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     org_id = Column(UUID(as_uuid=True), ForeignKey("orgs.id"), nullable=False)
     control_id = Column(UUID(as_uuid=True), ForeignKey("controls.id"), nullable=False)
     status = Column(String(50), nullable=False, default='pending')  # pending, processing, completed, failed
     model = Column(String(100))
     prompt_version = Column(String(50))
+    progress_percentage = Column(Integer, default=0)
+    current_step = Column(Text, default='Initializing...')
+    total_requirements = Column(Integer, default=0)
+    processed_requirements = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
-    
+
     org = relationship("Org")
     control = relationship("Control")
     results = relationship("ScanResult", back_populates="scan")

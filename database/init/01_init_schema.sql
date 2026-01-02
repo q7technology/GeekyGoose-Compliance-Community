@@ -116,6 +116,10 @@ CREATE TABLE IF NOT EXISTS scans (
     status VARCHAR(50) DEFAULT 'pending',
     model VARCHAR(100),
     prompt_version VARCHAR(50),
+    progress_percentage INTEGER DEFAULT 0,
+    current_step TEXT DEFAULT 'Initializing...',
+    total_requirements INTEGER DEFAULT 0,
+    processed_requirements INTEGER DEFAULT 0,
     started_at TIMESTAMPTZ DEFAULT NOW(),
     completed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -190,6 +194,7 @@ CREATE INDEX IF NOT EXISTS idx_document_control_links_control_id ON document_con
 CREATE INDEX IF NOT EXISTS idx_document_control_links_confidence ON document_control_links(confidence);
 CREATE INDEX IF NOT EXISTS idx_scans_org_id ON scans(org_id);
 CREATE INDEX IF NOT EXISTS idx_scans_control_id ON scans(control_id);
+CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(status);
 CREATE INDEX IF NOT EXISTS idx_scan_results_scan_id ON scan_results(scan_id);
 CREATE INDEX IF NOT EXISTS idx_gaps_scan_id ON gaps(scan_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_org_id ON audit_logs(org_id);

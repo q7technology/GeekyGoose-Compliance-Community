@@ -144,6 +144,11 @@ export default function ControlsPage() {
   const [loading, setLoading] = useState(false);
   const [scanningControl, setScanningControl] = useState<string | null>(null);
   const [scanResults, setScanResults] = useState<{ [key: string]: any }>({});
+  const [scanProgress, setScanProgress] = useState<{
+    percentage: number;
+    step: string;
+    controlCode: string;
+  } | null>(null);
 
   useEffect(() => {
     fetchFrameworks();
@@ -187,6 +192,18 @@ export default function ControlsPage() {
 
   const runAIScan = async (controlId: string) => {
     setScanningControl(controlId);
+
+    // Find the control to get its code for display
+    const control = controls.find(c => c.id === controlId);
+    const controlCode = control?.code || 'Unknown';
+
+    // Initialize progress
+    setScanProgress({
+      percentage: 0,
+      step: 'Starting scan...',
+      controlCode
+    });
+
     try {
       // Start the scan
       const response = await fetch(`/api/controls/${controlId}/scan`, {
@@ -213,11 +230,11 @@ export default function ControlsPage() {
 
       // Poll for scan results
       let attempts = 0;
-      const maxAttempts = 300; // 300 attempts = 5 minutes max (AI scans can take a while)
+      const maxAttempts = 600; // 600 attempts = 10 minutes max (AI scans can take a while)
 
       const pollResults = async (): Promise<any> => {
         if (attempts >= maxAttempts) {
-          throw new Error('Scan timeout - AI scan took longer than 5 minutes. Check worker logs for errors.');
+          throw new Error('Scan timeout - AI scan took longer than 10 minutes. Check worker logs for errors.');
         }
 
         attempts++;
@@ -231,10 +248,19 @@ export default function ControlsPage() {
 
           const scanData = await statusResponse.json();
 
+          // Update progress bar with current scan status
+          if (scanData.progress_percentage !== undefined && scanData.current_step) {
+            setScanProgress({
+              percentage: scanData.progress_percentage,
+              step: scanData.current_step,
+              controlCode
+            });
+          }
+
           if (scanData.status === 'completed') {
             return scanData;
           } else if (scanData.status === 'failed') {
-            throw new Error('Scan failed during processing');
+            throw new Error(`Scan failed: ${scanData.current_step || 'Unknown error'}`);
           } else {
             // Still processing, wait and try again
             await new Promise(resolve => setTimeout(resolve, 1000));
@@ -285,6 +311,7 @@ export default function ControlsPage() {
       alert(errorMessage);
     } finally {
       setScanningControl(null);
+      setScanProgress(null);
     }
   };
 
@@ -297,6 +324,38 @@ export default function ControlsPage() {
             Browse and manage compliance controls across different frameworks.
           </p>
         </div>
+
+        {/* AI Scan Progress Bar */}
+        {scanProgress && (
+          <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4 shadow-sm">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <div className="animate-pulse text-blue-600">
+                  🤖
+                </div>
+                <span className="font-semibold text-gray-900">
+                  AI Scanning: {scanProgress.controlCode}
+                </span>
+              </div>
+              <span className="text-sm font-medium text-blue-700">
+                {scanProgress.percentage}%
+              </span>
+            </div>
+
+            {/* Progress bar */}
+            <div className="w-full bg-gray-200 rounded-full h-2.5 mb-2 overflow-hidden">
+              <div
+                className="bg-gradient-to-r from-blue-600 to-indigo-600 h-2.5 rounded-full transition-all duration-500 ease-out"
+                style={{ width: `${scanProgress.percentage}%` }}
+              />
+            </div>
+
+            {/* Current step */}
+            <div className="text-sm text-gray-700">
+              {scanProgress.step}
+            </div>
+          </div>
+        )}
 
         {/* Framework Selector */}
         <div className="mb-6">

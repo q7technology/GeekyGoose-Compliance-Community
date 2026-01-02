@@ -90,15 +90,19 @@ def process_scan(self, scan_id: str):
         else:
             model_name = 'gpt-4'
 
-        # Update scan status
+        # Get control and requirements first to set total
+        control = scan.control
+        requirements = db.query(Requirement).filter(Requirement.control_id == control.id).all()
+
+        # Update scan status with initial progress
         scan.status = 'processing'
         scan.model = model_name
         scan.prompt_version = 'v1.0'
+        scan.progress_percentage = 0
+        scan.current_step = 'Initializing scan...'
+        scan.total_requirements = len(requirements)
+        scan.processed_requirements = 0
         db.commit()
-        
-        # Get control and requirements
-        control = scan.control
-        requirements = db.query(Requirement).filter(Requirement.control_id == control.id).all()
         
         # Get linked evidence documents (both manual and AI-linked)
         # Manual evidence links
@@ -117,10 +121,17 @@ def process_scan(self, scan_id: str):
         if total_evidence == 0:
             logger.warning(f"No evidence linked to control {control.code} for scan {scan_id}")
             scan.status = 'completed'
+            scan.progress_percentage = 100
+            scan.current_step = 'No evidence to scan'
             db.commit()
             return {"status": "completed", "message": "No evidence to scan"}
 
         logger.info(f"Found {len(manual_evidence_links)} manual + {len(ai_evidence_links)} AI-linked evidence for control {control.code}")
+
+        # Update progress: gathering evidence
+        scan.progress_percentage = 10
+        scan.current_step = f'Gathering evidence from {total_evidence} documents...'
+        db.commit()
 
         # Gather evidence text from both sources
         evidence_texts = []
@@ -154,19 +165,29 @@ def process_scan(self, scan_id: str):
                         "page_num": page.page_num,
                         "text": page.text
                     })
-        
+
+        # Update progress: starting AI analysis
+        scan.progress_percentage = 20
+        scan.current_step = f'Analyzing {len(requirements)} requirements with AI...'
+        db.commit()
+
         # Run AI scan
         scan_results = compliance_scanner.scan_control(
             control=control,
             requirements=requirements,
             evidence_texts=evidence_texts
         )
+
+        # Update progress: AI analysis complete
+        scan.progress_percentage = 80
+        scan.current_step = 'Storing scan results...'
+        db.commit()
         
         # Store scan results
         for result in scan_results["requirements"]:
-            # Store raw values - PostgreSQL JSONB will handle JSON encoding
-            rationale_json = result.get("rationale", "")
-            citations_json = result.get("citations", [])
+            # JSON-encode for SQLAlchemy JSONB adapter
+            rationale_json = json.dumps(result.get("rationale", ""))
+            citations_json = json.dumps(result.get("citations", []))
             
             scan_result = ScanResult(
                 scan_id=scan.id,
@@ -204,8 +225,11 @@ def process_scan(self, scan_id: str):
         
         # Update scan status
         scan.status = 'completed'
+        scan.progress_percentage = 100
+        scan.current_step = 'Scan completed'
+        scan.processed_requirements = len(requirements)
         db.commit()
-        
+
         logger.info(f"Compliance scan {scan_id} completed successfully")
         
         return {
@@ -219,6 +243,7 @@ def process_scan(self, scan_id: str):
         logger.error(f"Error processing scan {scan_id}: {str(e)}")
         # Update scan status to failed
         scan.status = 'failed'
+        scan.current_step = f'Error: {str(e)[:100]}'
         db.commit()
         db.rollback()
         raise self.retry(exc=e, countdown=60, max_retries=3)
