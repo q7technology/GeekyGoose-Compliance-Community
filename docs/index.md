@@ -6,20 +6,22 @@ title: Home
 <div class="hero">
   <div class="hero-grid">
     <div>
-      <div class="kicker"><span class="dot"></span> Open‑source compliance automation</div>
+      <div class="kicker"><span class="dot"></span> Open-source compliance automation</div>
 
       <h1>
-        <span class="gradient-text">Get compliant fast</span><br/>
+        <span class="gradient-text">Get compliant fast</span><br />
         without the busywork
       </h1>
 
       <p class="lede">
-        GeekyGoose Compliance helps teams map evidence to controls, spot gaps, and ship audit‑ready reporting using AI —
+        GeekyGoose Compliance helps teams map evidence to controls, spot gaps, and ship audit-ready reporting using AI —
         with support for local models (Ollama) and cloud providers.
       </p>
 
       <div class="hero-actions">
-        <a class="btn btn-primary" href="https://github.com/q7technology/GeekyGoose-Compliance-Community" target="_blank" rel="noopener">View on GitHub</a>
+        <a class="btn btn-primary" href="https://github.com/q7technology/GeekyGoose-Compliance-Community" target="_blank" rel="noopener">
+          View on GitHub
+        </a>
         <a class="btn btn-ghost" href="{{ '/license' | relative_url }}">Review licensing</a>
         <a class="btn btn-outline" href="{{ '/commercial' | relative_url }}">Commercial options</a>
       </div>
@@ -28,7 +30,7 @@ title: Home
         <span class="pill">Essential Eight</span>
         <span class="pill">ISO 27001 (roadmap)</span>
         <span class="pill">NIST / CIS (extensible)</span>
-        <span class="pill">Multi‑tenant</span>
+        <span class="pill">Multi-tenant</span>
       </div>
     </div>
 
@@ -36,7 +38,7 @@ title: Home
       <h3>At a glance</h3>
       <div class="metric"><span class="num">0.3.0</span><span class="lbl">Current release</span></div>
       <div class="metric"><span class="num">AI</span><span class="lbl">Evidence → Control mapping</span></div>
-      <div class="metric"><span class="num">Docker</span><span class="lbl">One‑command deploy</span></div>
+      <div class="metric"><span class="num">Docker</span><span class="lbl">One-command deploy</span></div>
       <div class="pills">
         <span class="pill">FastAPI</span>
         <span class="pill">Next.js</span>
@@ -59,19 +61,19 @@ title: Home
   <div class="grid">
     <div class="card">
       <div class="icon">🤖</div>
-      <h3>AI‑powered analysis</h3>
+      <h3>AI-powered analysis</h3>
       <p>Automatically scan documents and map evidence to controls, with gap detection and remediation suggestions.</p>
     </div>
 
     <div class="card">
       <div class="icon">📊</div>
       <h3>Stakeholder reporting</h3>
-      <p>Executive‑friendly summaries plus detailed, audit‑ready artefacts for assessors and internal reviewers.</p>
+      <p>Executive-friendly summaries plus detailed, audit-ready artefacts for assessors and internal reviewers.</p>
     </div>
 
     <div class="card">
       <div class="icon">🧩</div>
-      <h3>Framework‑ready</h3>
+      <h3>Framework-ready</h3>
       <p>Essential Eight today, with a clean path to ISO 27001, NIST CSF, CIS Controls and more.</p>
     </div>
   </div>
@@ -84,21 +86,20 @@ title: Home
       <p>Run it locally in minutes with Docker Compose.</p>
     </div>
   </div>
-  
-<div markdown="1">
-```bash
-git clone https://github.com/q7technology/GeekyGoose-Compliance-Community.git
+
+  <!-- Use pure HTML code block so GitHub Pages always renders it correctly -->
+  <div class="content">
+    <pre><code class="language-bash">git clone https://github.com/q7technology/GeekyGoose-Compliance-Community.git
 cd GeekyGoose-Compliance-Community
 
 cp .env.example .env
 docker-compose up -d
 
 docker-compose exec api python init_db.py
-docker-compose exec api python run_seed.py
+docker-compose exec api python run_seed.py</code></pre>
 
-# Open the web app
-# http://localhost:3000
-```</div>
+    <p>Open the web app: <a href="http://localhost:3000">http://localhost:3000</a></p>
+  </div>
 
   <div class="callout">
     <strong>Tip:</strong>
@@ -118,7 +119,7 @@ docker-compose exec api python run_seed.py
     <div class="card">
       <div class="icon">🆓</div>
       <h3>Community (AGPLv3)</h3>
-      <p>Perfect for self‑hosted/internal deployments and evaluation. Network use + modifications require source availability.</p>
+      <p>Perfect for self-hosted/internal deployments and evaluation. Network use + modifications require source availability.</p>
       <div style="margin-top:14px;"><a class="btn btn-ghost" href="{{ '/license' | relative_url }}">Learn more</a></div>
     </div>
 
@@ -132,7 +133,7 @@ docker-compose exec api python run_seed.py
     <div class="card">
       <div class="icon">🏷️</div>
       <h3>Trademark</h3>
-      <p>Code is open; the name & logo are protected. Clear rules for forks, resellers, and community projects.</p>
+      <p>Code is open; the name &amp; logo are protected. Clear rules for forks, resellers, and community projects.</p>
       <div style="margin-top:14px;"><a class="btn btn-ghost" href="{{ '/trademark' | relative_url }}">Read policy</a></div>
     </div>
   </div>

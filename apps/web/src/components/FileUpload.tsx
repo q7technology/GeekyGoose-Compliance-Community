@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, DragEvent, ChangeEvent } from 'react'
 
 interface UploadedFile {
   id: string
@@ -55,17 +55,17 @@ export default function FileUpload({ onUploadComplete, enableControlMapping = fa
   const [showAiCompleteBanner, setShowAiCompleteBanner] = useState(false)
   const [aiCompleteMessage, setAiCompleteMessage] = useState('')
 
-  const handleDrop = async (e: React.DragEvent) => {
+  const handleDrop = async (e: DragEvent) => {
     e.preventDefault()
     setIsDragging(false)
-    
+
     const files = Array.from(e.dataTransfer.files)
     if (files.length > 0) {
       await uploadMultipleFiles(files)
     }
   }
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (files && files.length > 0) {
       await uploadMultipleFiles(Array.from(files))

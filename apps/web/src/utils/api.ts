@@ -286,7 +286,7 @@ export function debounceApi<T extends any[], R>(
   fn: (...args: T) => Promise<R>,
   delay: number
 ): (...args: T) => Promise<R> {
-  let timeoutId: NodeJS.Timeout;
+  let timeoutId: ReturnType<typeof setTimeout>;
   
   return (...args: T): Promise<R> => {
     clearTimeout(timeoutId);

@@ -52,6 +52,17 @@ interface AIValidationResult {
   validated_at: string;
 }
 
+interface LinkedDocument {
+  id: string;
+  filename: string;
+  mime_type: string;
+  file_size: number;
+  created_at: string;
+  download_url: string;
+  confidence?: number;
+  reasoning?: string;
+}
+
 export default function FillTemplatePage() {
   const params = useParams();
   const router = useRouter();
@@ -66,6 +77,8 @@ export default function FillTemplatePage() {
   const [aiValidationResults, setAiValidationResults] = useState<Record<string, AIValidationResult>>({});
   const [validatingEvidence, setValidatingEvidence] = useState<Set<string>>(new Set());
   const [runningFullValidation, setRunningFullValidation] = useState(false);
+  const [linkedDocuments, setLinkedDocuments] = useState<LinkedDocument[]>([]);
+  const [selectedDocuments, setSelectedDocuments] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (templateId) {
@@ -97,6 +110,19 @@ export default function FillTemplatePage() {
             initialEvidenceUploads[req.requirement_code] = { file: null, note: '' };
           });
           setEvidenceUploads(initialEvidenceUploads);
+
+          // Fetch linked documents from the control
+          if (foundTemplate.control?.id) {
+            try {
+              const response = await fetch(`/api/controls/${foundTemplate.control.id}/documents`);
+              if (response.ok) {
+                const data = await response.json();
+                setLinkedDocuments(data.documents || []);
+              }
+            } catch (error) {
+              console.error('Failed to fetch linked documents:', error);
+            }
+          }
         } else {
           console.error('Template not found');
           return;
@@ -105,7 +131,7 @@ export default function FillTemplatePage() {
         console.error('No templates found in storage');
         return;
       }
-      
+
     } catch (error) {
       console.error('Failed to fetch template:', error);
     } finally {
