@@ -182,18 +182,23 @@ function LinkedDocuments({ controlId }: { controlId: string }) {
   );
 }
 
+interface RunningScan {
+  controlId: string;
+  controlCode: string;
+  scanId: string;
+  percentage: number;
+  step: string;
+  status: 'running' | 'completed' | 'failed';
+}
+
 export default function ControlsPage() {
   const [frameworks, setFrameworks] = useState<Framework[]>([]);
   const [controls, setControls] = useState<Control[]>([]);
   const [selectedFramework, setSelectedFramework] = useState<string>('');
   const [loading, setLoading] = useState(false);
-  const [scanningControl, setScanningControl] = useState<string | null>(null);
+  const [runningScans, setRunningScans] = useState<{ [key: string]: RunningScan }>({});
   const [scanResults, setScanResults] = useState<{ [key: string]: any }>({});
-  const [scanProgress, setScanProgress] = useState<{
-    percentage: number;
-    step: string;
-    controlCode: string;
-  } | null>(null);
+  const [showScansPopup, setShowScansPopup] = useState(false);
 
   useEffect(() => {
     fetchFrameworks();
@@ -236,18 +241,9 @@ export default function ControlsPage() {
   };
 
   const runAIScan = async (controlId: string) => {
-    setScanningControl(controlId);
-
     // Find the control to get its code for display
     const control = controls.find(c => c.id === controlId);
     const controlCode = control?.code || 'Unknown';
-
-    // Initialize progress
-    setScanProgress({
-      percentage: 0,
-      step: 'Starting scan...',
-      controlCode
-    });
 
     try {
       // Start the scan
@@ -273,91 +269,145 @@ export default function ControlsPage() {
         throw new Error('No scan ID returned from server');
       }
 
-      // Poll for scan results
-      let attempts = 0;
-      const maxAttempts = 600; // 600 attempts = 10 minutes max (AI scans can take a while)
-
-      const pollResults = async (): Promise<any> => {
-        if (attempts >= maxAttempts) {
-          throw new Error('Scan timeout - AI scan took longer than 10 minutes. Check worker logs for errors.');
+      // Add scan to running scans and show popup
+      setRunningScans(prev => ({
+        ...prev,
+        [controlId]: {
+          controlId,
+          controlCode,
+          scanId,
+          percentage: 0,
+          step: 'Starting scan...',
+          status: 'running'
         }
+      }));
+      setShowScansPopup(true);
 
-        attempts++;
+      // Poll for scan results in background
+      pollScanStatus(controlId, scanId, controlCode);
+    } catch (error: unknown) {
+      console.error('Failed to start AI scan:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to start AI scan. Please try again.';
+      alert(errorMessage);
+    }
+  };
 
-        try {
-          const statusResponse = await fetch(`/api/scans/${scanId}`);
+  const pollScanStatus = async (controlId: string, scanId: string, controlCode: string) => {
+    let attempts = 0;
+    const maxAttempts = 600; // 600 attempts = 10 minutes max
 
-          if (!statusResponse.ok) {
-            throw new Error(`Failed to fetch scan status (${statusResponse.status})`);
+    const poll = async (): Promise<void> => {
+      if (attempts >= maxAttempts) {
+        setRunningScans(prev => ({
+          ...prev,
+          [controlId]: {
+            ...prev[controlId],
+            status: 'failed',
+            step: 'Scan timeout - took longer than 10 minutes'
           }
-
-          const scanData = await statusResponse.json();
-
-          // Update progress bar with current scan status
-          if (scanData.progress_percentage !== undefined && scanData.current_step) {
-            setScanProgress({
-              percentage: scanData.progress_percentage,
-              step: scanData.current_step,
-              controlCode
-            });
-          }
-
-          if (scanData.status === 'completed') {
-            return scanData;
-          } else if (scanData.status === 'failed') {
-            throw new Error(`Scan failed: ${scanData.current_step || 'Unknown error'}`);
-          } else {
-            // Still processing, wait and try again
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            return pollResults();
-          }
-        } catch (error) {
-          if (attempts < maxAttempts) {
-            // Retry on network errors
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            return pollResults();
-          }
-          throw error;
-        }
-      };
-
-      const scanResults = await pollResults();
-
-      if (!scanResults) {
-        throw new Error('No scan results returned');
+        }));
+        return;
       }
 
-      // Calculate compliance level
-      const results = scanResults.results || [];
-      const passCount = results.filter((r: any) => r.outcome === 'PASS').length;
-      const totalCount = results.length || 1;
-      const overallScore = totalCount > 0 ? passCount / totalCount : 0;
+      attempts++;
 
-      let complianceLevel = 'NON_COMPLIANT';
-      if (overallScore >= 0.9) complianceLevel = 'COMPLIANT';
-      else if (overallScore >= 0.5) complianceLevel = 'PARTIAL';
+      try {
+        const statusResponse = await fetch(`/api/scans/${scanId}`);
 
-      const result = {
-        ...scanResults,
-        compliance_level: complianceLevel,
-        overall_score: overallScore,
-        model: scanResults.model || 'Unknown'
-      };
+        if (!statusResponse.ok) {
+          throw new Error(`Failed to fetch scan status (${statusResponse.status})`);
+        }
 
-      setScanResults(prev => ({
-        ...prev,
-        [controlId]: result
-      }));
+        const scanData = await statusResponse.json();
 
-      alert(`AI Scan completed!\n\nModel: ${result.model}\nCompliance Level: ${complianceLevel}\nOverall Score: ${Math.round(overallScore * 100)}%\n\nPassed: ${passCount}/${totalCount} requirements`);
-    } catch (error: unknown) {
-      console.error('Failed to run AI scan:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to run AI scan. Please try again.';
-      alert(errorMessage);
-    } finally {
-      setScanningControl(null);
-      setScanProgress(null);
-    }
+        // Update progress
+        if (scanData.progress_percentage !== undefined && scanData.current_step) {
+          setRunningScans(prev => ({
+            ...prev,
+            [controlId]: {
+              ...prev[controlId],
+              percentage: scanData.progress_percentage,
+              step: scanData.current_step
+            }
+          }));
+        }
+
+        if (scanData.status === 'completed') {
+          // Calculate compliance level
+          const results = scanData.results || [];
+          const passCount = results.filter((r: any) => r.outcome === 'PASS').length;
+          const totalCount = results.length || 1;
+          const overallScore = totalCount > 0 ? passCount / totalCount : 0;
+
+          let complianceLevel = 'NON_COMPLIANT';
+          if (overallScore >= 0.9) complianceLevel = 'COMPLIANT';
+          else if (overallScore >= 0.5) complianceLevel = 'PARTIAL';
+
+          const result = {
+            ...scanData,
+            compliance_level: complianceLevel,
+            overall_score: overallScore,
+            model: scanData.model || 'Unknown'
+          };
+
+          setScanResults(prev => ({
+            ...prev,
+            [controlId]: result
+          }));
+
+          setRunningScans(prev => ({
+            ...prev,
+            [controlId]: {
+              ...prev[controlId],
+              status: 'completed',
+              percentage: 100,
+              step: `Completed! ${complianceLevel} - ${Math.round(overallScore * 100)}%`
+            }
+          }));
+
+          // Remove from running scans after 3 seconds
+          setTimeout(() => {
+            setRunningScans(prev => {
+              const updated = { ...prev };
+              delete updated[controlId];
+              return updated;
+            });
+          }, 3000);
+
+          return;
+        } else if (scanData.status === 'failed') {
+          setRunningScans(prev => ({
+            ...prev,
+            [controlId]: {
+              ...prev[controlId],
+              status: 'failed',
+              step: scanData.current_step || 'Scan failed'
+            }
+          }));
+          return;
+        } else {
+          // Still processing, wait and try again
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          return poll();
+        }
+      } catch (error) {
+        if (attempts < maxAttempts) {
+          // Retry on network errors
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          return poll();
+        }
+        setRunningScans(prev => ({
+          ...prev,
+          [controlId]: {
+            ...prev[controlId],
+            status: 'failed',
+            step: 'Network error - please check your connection'
+          }
+        }));
+      }
+    };
+
+    await poll();
   };
 
   return (
@@ -370,36 +420,88 @@ export default function ControlsPage() {
           </p>
         </div>
 
-        {/* AI Scan Progress Bar */}
-        {scanProgress && (
-          <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-lg p-4 shadow-sm">
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-2">
-                <div className="animate-pulse text-blue-600">
-                  🤖
-                </div>
-                <span className="font-semibold text-gray-900">
-                  AI Scanning: {scanProgress.controlCode}
+        {/* AI Scans Popup */}
+        {Object.keys(runningScans).length > 0 && showScansPopup && (
+          <div className="fixed bottom-4 right-4 z-50 w-96 max-h-[600px] bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden">
+            <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-4 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-white">
+                <div className="animate-pulse">🤖</div>
+                <h3 className="font-bold">AI Compliance Scans</h3>
+                <span className="bg-white/20 px-2 py-0.5 rounded-full text-xs">
+                  {Object.keys(runningScans).length}
                 </span>
               </div>
-              <span className="text-sm font-medium text-blue-700">
-                {scanProgress.percentage}%
-              </span>
+              <button
+                onClick={() => setShowScansPopup(false)}
+                className="text-white/80 hover:text-white transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
             </div>
+            <div className="overflow-y-auto max-h-[500px]">
+              {Object.values(runningScans).map((scan) => (
+                <div
+                  key={scan.controlId}
+                  className="p-4 border-b border-gray-100 last:border-b-0"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-semibold text-gray-900">{scan.controlCode}</span>
+                    <div className="flex items-center gap-2">
+                      {scan.status === 'running' && (
+                        <div className="animate-spin rounded-full h-4 w-4 border-2 border-blue-600 border-t-transparent"></div>
+                      )}
+                      {scan.status === 'completed' && (
+                        <div className="text-green-600">✓</div>
+                      )}
+                      {scan.status === 'failed' && (
+                        <div className="text-red-600">✗</div>
+                      )}
+                      <span className={`text-sm font-medium ${
+                        scan.status === 'completed' ? 'text-green-600' :
+                        scan.status === 'failed' ? 'text-red-600' :
+                        'text-blue-600'
+                      }`}>
+                        {scan.percentage}%
+                      </span>
+                    </div>
+                  </div>
 
-            {/* Progress bar */}
-            <div className="w-full bg-gray-200 rounded-full h-2.5 mb-2 overflow-hidden">
-              <div
-                className="bg-gradient-to-r from-blue-600 to-indigo-600 h-2.5 rounded-full transition-all duration-500 ease-out"
-                style={{ width: `${scanProgress.percentage}%` }}
-              />
-            </div>
+                  {/* Progress bar */}
+                  <div className="w-full bg-gray-200 rounded-full h-2 mb-2 overflow-hidden">
+                    <div
+                      className={`h-2 rounded-full transition-all duration-500 ${
+                        scan.status === 'completed' ? 'bg-gradient-to-r from-green-500 to-green-600' :
+                        scan.status === 'failed' ? 'bg-gradient-to-r from-red-500 to-red-600' :
+                        'bg-gradient-to-r from-blue-500 to-purple-600'
+                      }`}
+                      style={{ width: `${scan.percentage}%` }}
+                    />
+                  </div>
 
-            {/* Current step */}
-            <div className="text-sm text-gray-700">
-              {scanProgress.step}
+                  {/* Status text */}
+                  <div className="text-xs text-gray-600">{scan.step}</div>
+                </div>
+              ))}
             </div>
+            {Object.keys(runningScans).length === 0 && (
+              <div className="p-4 text-center text-gray-500 text-sm">
+                No running scans
+              </div>
+            )}
           </div>
+        )}
+
+        {/* Floating button to toggle popup when hidden */}
+        {Object.keys(runningScans).length > 0 && !showScansPopup && (
+          <button
+            onClick={() => setShowScansPopup(true)}
+            className="fixed bottom-4 right-4 z-50 bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-3 rounded-full shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
+          >
+            <div className="animate-pulse">🤖</div>
+            <span className="font-semibold">{Object.keys(runningScans).length} AI Scan{Object.keys(runningScans).length !== 1 ? 's' : ''} Running</span>
+          </button>
         )}
 
         {/* Framework Selector */}
@@ -517,14 +619,14 @@ export default function ControlsPage() {
                     {control.linked_documents_count > 0 && (
                       <button
                         onClick={() => runAIScan(control.id)}
-                        disabled={scanningControl === control.id}
+                        disabled={!!runningScans[control.id]}
                         className={`w-full inline-flex items-center justify-center px-3 py-2 border border-transparent text-sm font-medium rounded-md ${
-                          scanningControl === control.id
+                          runningScans[control.id]
                             ? 'bg-gray-400 cursor-not-allowed text-white'
                             : 'text-green-700 bg-green-100 hover:bg-green-200'
                         }`}
                       >
-                        {scanningControl === control.id ? (
+                        {runningScans[control.id] ? (
                           <>
                             <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
                             Running AI Scan...

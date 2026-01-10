@@ -66,6 +66,7 @@ export default function TemplatesPage() {
   const [loading, setLoading] = useState(true);
   const [showEssentialEightDropdown, setShowEssentialEightDropdown] = useState(false);
   const [controlsWithEvidence, setControlsWithEvidence] = useState<{ [key: string]: boolean }>({});
+  const [controlsAIData, setControlsAIData] = useState<{ [key: string]: any }>({});
   
   // Create template form state
   const [newTemplate, setNewTemplate] = useState({
@@ -109,8 +110,9 @@ export default function TemplatesPage() {
       const existingTemplates: Template[] = storedTemplates ? JSON.parse(storedTemplates) : [];
       setTemplates(existingTemplates);
 
-      // Fetch controls from API to check if they have linked documents/evidence
+      // Fetch controls from API to check if they have linked documents/evidence and AI scan data
       const controlsEvidenceMap: { [key: string]: boolean } = {};
+      const controlsAI: { [key: string]: any } = {};
       try {
         // Try to fetch Essential Eight framework controls
         const frameworksResponse = await fetch('/api/frameworks');
@@ -124,14 +126,41 @@ export default function TemplatesPage() {
             const controlsResponse = await fetch(`/api/frameworks/${essentialEightFramework.id}/controls`);
             if (controlsResponse.ok) {
               const controlsData = await controlsResponse.json();
-              controlsData.controls?.forEach((control: any) => {
+
+              // Fetch scans for each control to get AI analysis data
+              for (const control of controlsData.controls || []) {
                 // Mark as satisfied if control has linked documents
                 controlsEvidenceMap[control.code] = (control.linked_documents_count || 0) > 0;
-              });
+
+                // Fetch scan data for this control
+                try {
+                  const scansResponse = await fetch(`/api/controls/${control.id}/scans`);
+                  if (scansResponse.ok) {
+                    const scansData = await scansResponse.json();
+                    const latestScan = scansData.scans?.[0]; // Get most recent scan
+
+                    if (latestScan && latestScan.status === 'completed') {
+                      controlsAI[control.code] = {
+                        scanId: latestScan.id,
+                        status: latestScan.status,
+                        completedAt: latestScan.completed_at,
+                        passRate: latestScan.pass_count && latestScan.total_requirements
+                          ? Math.round((latestScan.pass_count / latestScan.total_requirements) * 100)
+                          : null,
+                        gapsCount: latestScan.gap_count || 0,
+                        hasGaps: (latestScan.gap_count || 0) > 0
+                      };
+                    }
+                  }
+                } catch (error) {
+                  console.error(`Failed to fetch scans for control ${control.code}:`, error);
+                }
+              }
             }
           }
         }
         setControlsWithEvidence(controlsEvidenceMap);
+        setControlsAIData(controlsAI);
       } catch (error) {
         console.error('Failed to fetch controls evidence status:', error);
       }
@@ -464,6 +493,7 @@ export default function TemplatesPage() {
           {allRequiredTemplates.map((template) => {
             const isGap = template.isGap;
             const isSatisfied = template.isSatisfied;
+            const aiData = controlsAIData[template.control.code];
 
             return (
               <div
@@ -483,7 +513,7 @@ export default function TemplatesPage() {
                       <p className="text-sm text-blue-600 mt-1">
                         {template.control.code}: {template.control.title}
                       </p>
-                      <div className="flex items-center gap-2 mt-2">
+                      <div className="flex items-center gap-2 mt-2 flex-wrap">
                         <span className="inline-block bg-gray-100 text-gray-700 text-xs px-2 py-1 rounded-full">
                           {template.control.framework_name}
                         </span>
@@ -497,6 +527,20 @@ export default function TemplatesPage() {
                             ⚠ Gap - Template Needed
                           </span>
                         )}
+                        {aiData && aiData.passRate !== null && (
+                          <span className={`inline-block text-xs px-2 py-1 rounded-full ${
+                            aiData.passRate >= 80 ? 'bg-green-100 text-green-700' :
+                            aiData.passRate >= 50 ? 'bg-yellow-100 text-yellow-700' :
+                            'bg-red-100 text-red-700'
+                          }`}>
+                            AI: {aiData.passRate}% Pass
+                          </span>
+                        )}
+                        {aiData && aiData.hasGaps && (
+                          <span className="inline-block bg-orange-100 text-orange-700 text-xs px-2 py-1 rounded-full">
+                            {aiData.gapsCount} Gap{aiData.gapsCount !== 1 ? 's' : ''} Found
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -507,6 +551,30 @@ export default function TemplatesPage() {
                       : template.description
                     }
                   </p>
+
+                  {aiData && (
+                    <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                      <div className="text-xs font-semibold text-blue-900 mb-2">AI Scan Results</div>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <span className="text-gray-600">Status:</span>
+                          <span className="ml-1 font-medium text-gray-900 capitalize">{aiData.status}</span>
+                        </div>
+                        {aiData.passRate !== null && (
+                          <div>
+                            <span className="text-gray-600">Pass Rate:</span>
+                            <span className="ml-1 font-medium text-gray-900">{aiData.passRate}%</span>
+                          </div>
+                        )}
+                        {aiData.gapsCount > 0 && (
+                          <div className="col-span-2">
+                            <span className="text-gray-600">Identified Gaps:</span>
+                            <span className="ml-1 font-medium text-orange-700">{aiData.gapsCount}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="mb-4">
                     <div className="flex items-center justify-between text-xs text-gray-500 mb-2">
