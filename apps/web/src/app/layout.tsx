@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import type { ReactNode } from 'react'
 import './globals.css'
 import Sidebar from '../components/Sidebar'
+import GlobalScanStatus from '../components/GlobalScanStatus'
 
 export const metadata: Metadata = {
   title: 'GeekyGoose Compliance',
@@ -22,6 +23,7 @@ export default function RootLayout({
             {children}
           </main>
         </div>
+        <GlobalScanStatus />
       </body>
     </html>
   )

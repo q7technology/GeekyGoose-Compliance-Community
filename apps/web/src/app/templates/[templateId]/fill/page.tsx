@@ -139,9 +139,9 @@ export default function FillTemplatePage() {
     }
   };
 
-  const validateForm = (): boolean => {
+  const validateForm = (requireEvidence: boolean = false): boolean => {
     const newErrors: Record<string, string> = {};
-    
+
     // Validate company fields
     if (template) {
       template.company_fields.forEach(field => {
@@ -149,18 +149,20 @@ export default function FillTemplatePage() {
           newErrors[field.field_name] = `${field.field_name.replace('_', ' ')} is required`;
         }
       });
-      
-      // Validate required evidence
-      template.evidence_requirements.forEach(req => {
-        const hasUploadedFile = evidenceUploads[req.requirement_code]?.file;
-        const hasSelectedDocument = Array.from(selectedDocuments).some(key => key.startsWith(`${req.requirement_code}-`));
 
-        if (req.required && !hasUploadedFile && !hasSelectedDocument) {
-          newErrors[req.requirement_code] = `Evidence for ${req.requirement_code} is required`;
-        }
-      });
+      // Only validate evidence if explicitly required (for submission)
+      if (requireEvidence) {
+        template.evidence_requirements.forEach(req => {
+          const hasUploadedFile = evidenceUploads[req.requirement_code]?.file;
+          const hasSelectedDocument = Array.from(selectedDocuments).some(key => key.startsWith(`${req.requirement_code}-`));
+
+          if (req.required && !hasUploadedFile && !hasSelectedDocument) {
+            newErrors[req.requirement_code] = `Evidence for ${req.requirement_code} is required`;
+          }
+        });
+      }
     }
-    
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -431,10 +433,11 @@ export default function FillTemplatePage() {
   };
 
   const submitTemplate = async () => {
-    if (!validateForm()) {
+    // For submission, require evidence to be uploaded
+    if (!validateForm(true)) {
       return;
     }
-    
+
     setSubmitting(true);
     try {
       const submission = {
@@ -1037,28 +1040,34 @@ export default function FillTemplatePage() {
                 <div>
                   <h3 className="text-lg font-medium text-gray-900">Review and Submit</h3>
                   <p className="text-sm text-gray-600 mt-1">
-                    {hasAllValidationPassed() 
-                      ? "All validation requirements met. Ready to download or submit."
-                      : "AI validation must pass for all required evidence before downloading or submitting."
-                    }
+                    Download your policy document with filled company information, or submit with evidence for full compliance tracking.
                   </p>
-                  {!hasAllValidationPassed() && (
-                    <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
-                      <div className="flex">
-                        <div className="flex-shrink-0">
-                          <svg className="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                          </svg>
+                  {(() => {
+                    const requiredFieldsFilled = template?.company_fields
+                      .filter(f => f.required)
+                      .every(f => companyData[f.field_name]?.trim());
+
+                    if (!requiredFieldsFilled) {
+                      return (
+                        <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                          <div className="flex">
+                            <div className="flex-shrink-0">
+                              <svg className="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                              </svg>
+                            </div>
+                            <div className="ml-3">
+                              <h4 className="text-sm font-medium text-yellow-800">Required Fields</h4>
+                              <p className="text-sm text-yellow-700 mt-1">
+                                Please fill in all required company information fields to download the policy document.
+                              </p>
+                            </div>
+                          </div>
                         </div>
-                        <div className="ml-3">
-                          <h4 className="text-sm font-medium text-yellow-800">Validation Required</h4>
-                          <p className="text-sm text-yellow-700 mt-1">
-                            Upload all required evidence and run AI validation to unlock download and submission features.
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
                 <div className="flex space-x-3">
                   <Link
@@ -1070,26 +1079,26 @@ export default function FillTemplatePage() {
                   {template && companyData.company_name && (
                     <button
                       onClick={() => downloadTemplateAsWord(template, companyData.company_name, companyData)}
-                      disabled={!hasAllValidationPassed()}
+                      disabled={!validateForm(false)}
                       className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white ${
-                        hasAllValidationPassed()
+                        validateForm(false)
                           ? 'bg-purple-600 hover:bg-purple-700'
                           : 'bg-gray-400 cursor-not-allowed'
                       }`}
-                      title={hasAllValidationPassed() ? 'Download completed policy document' : 'AI validation required before download'}
+                      title={validateForm(false) ? 'Download policy document with your company information' : 'Fill in required company fields first'}
                     >
                       📄 Download Policy Word
                     </button>
                   )}
                   <button
                     onClick={submitTemplate}
-                    disabled={submitting || !hasAllValidationPassed()}
+                    disabled={submitting}
                     className={`inline-flex items-center px-6 py-2 border border-transparent text-sm font-medium rounded-md text-white ${
-                      submitting || !hasAllValidationPassed()
+                      submitting
                         ? 'bg-gray-400 cursor-not-allowed'
                         : 'bg-blue-600 hover:bg-blue-700'
                     }`}
-                    title={hasAllValidationPassed() ? 'Submit completed template' : 'AI validation required before submission'}
+                    title="Submit template with company information and evidence"
                   >
                     {submitting ? (
                       <>
