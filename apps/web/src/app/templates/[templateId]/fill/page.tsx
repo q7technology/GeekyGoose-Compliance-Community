@@ -139,9 +139,17 @@ export default function FillTemplatePage() {
     }
   };
 
-  const validateForm = (): boolean => {
+  // Check if required company fields are filled (for download button)
+  const areRequiredFieldsFilled = (): boolean => {
+    if (!template) return false;
+    return template.company_fields
+      .filter(f => f.required)
+      .every(f => companyData[f.field_name]?.trim());
+  };
+
+  const validateForm = (requireEvidence: boolean = false): boolean => {
     const newErrors: Record<string, string> = {};
-    
+
     // Validate company fields
     if (template) {
       template.company_fields.forEach(field => {
@@ -149,15 +157,20 @@ export default function FillTemplatePage() {
           newErrors[field.field_name] = `${field.field_name.replace('_', ' ')} is required`;
         }
       });
-      
-      // Validate required evidence
-      template.evidence_requirements.forEach(req => {
-        if (req.required && !evidenceUploads[req.requirement_code]?.file) {
-          newErrors[req.requirement_code] = `Evidence for ${req.requirement_code} is required`;
-        }
-      });
+
+      // Only validate evidence if explicitly required (for submission)
+      if (requireEvidence) {
+        template.evidence_requirements.forEach(req => {
+          const hasUploadedFile = evidenceUploads[req.requirement_code]?.file;
+          const hasSelectedDocument = Array.from(selectedDocuments).some(key => key.startsWith(`${req.requirement_code}-`));
+
+          if (req.required && !hasUploadedFile && !hasSelectedDocument) {
+            newErrors[req.requirement_code] = `Evidence for ${req.requirement_code} is required`;
+          }
+        });
+      }
     }
-    
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -428,10 +441,11 @@ export default function FillTemplatePage() {
   };
 
   const submitTemplate = async () => {
-    if (!validateForm()) {
+    // For submission, require evidence to be uploaded
+    if (!validateForm(true)) {
       return;
     }
-    
+
     setSubmitting(true);
     try {
       const submission = {
@@ -775,41 +789,53 @@ export default function FillTemplatePage() {
             </div>
             <div className="p-6">
               <div className="space-y-6">
-                {template.evidence_requirements.map((req) => (
+                {template.evidence_requirements.map((req) => {
+                  const hasUploadedFile = evidenceUploads[req.requirement_code]?.file;
+                  const hasSelectedDocument = Array.from(selectedDocuments).some(key => key.startsWith(`${req.requirement_code}-`));
+                  const hasEvidence = hasUploadedFile || hasSelectedDocument;
+
+                  return (
                   <div key={req.requirement_code} className={`border rounded-lg p-4 ${
-                    req.required && evidenceUploads[req.requirement_code]?.file && aiValidationResults[req.requirement_code]?.status === 'passed'
+                    req.required && hasEvidence && aiValidationResults[req.requirement_code]?.status === 'passed'
                       ? 'border-green-300 bg-green-50'
-                      : req.required && evidenceUploads[req.requirement_code]?.file
+                      : req.required && hasEvidence
                       ? 'border-blue-300 bg-blue-50'
                       : 'border-gray-200'
                   }`}>
                     <div className="flex items-start justify-between mb-3">
                       <div>
                         <h3 className={`font-medium flex items-center ${
-                          req.required && evidenceUploads[req.requirement_code]?.file
+                          req.required && hasEvidence
                             ? 'text-green-900'
                             : 'text-gray-900'
                         }`}>
                           {req.requirement_code}
                           {req.required && (
                             <span className={`ml-1 ${
-                              evidenceUploads[req.requirement_code]?.file
+                              hasEvidence
                                 ? 'text-green-500'
                                 : 'text-red-500'
                             }`}>
-                              {evidenceUploads[req.requirement_code]?.file ? '✓' : '*'}
+                              {hasEvidence ? '✓' : '*'}
                             </span>
                           )}
                           <span className={`ml-2 text-xs px-2 py-1 rounded-full ${
-                            req.required && evidenceUploads[req.requirement_code]?.file
+                            req.required && hasEvidence
                               ? 'bg-green-100 text-green-700'
                               : 'bg-gray-100 text-gray-700'
                           }`}>
                             {req.evidence_type}
                           </span>
-                          
+
+                          {/* Evidence Count Indicator */}
+                          {hasSelectedDocument && (
+                            <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
+                              {Array.from(selectedDocuments).filter(key => key.startsWith(`${req.requirement_code}-`)).length} linked doc{Array.from(selectedDocuments).filter(key => key.startsWith(`${req.requirement_code}-`)).length !== 1 ? 's' : ''}
+                            </span>
+                          )}
+
                           {/* AI Validation Status Indicator */}
-                          {evidenceUploads[req.requirement_code]?.file && (
+                          {hasEvidence && (
                             <span className="ml-2">
                               {validatingEvidence.has(req.requirement_code) ? (
                                 <div className="flex items-center">
@@ -844,9 +870,81 @@ export default function FillTemplatePage() {
                     </div>
                     
                     <div className="space-y-3">
+                      {/* Linked Documents Section */}
+                      {linkedDocuments.length > 0 && (
+                        <div className="mb-4">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Available Evidence from Control
+                          </label>
+                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2 max-h-48 overflow-y-auto">
+                            {linkedDocuments.map((doc) => (
+                              <div
+                                key={doc.id}
+                                className="flex items-center justify-between bg-white p-2 rounded border border-blue-100 hover:border-blue-300 transition-colors"
+                              >
+                                <div className="flex items-center gap-2 flex-1">
+                                  <input
+                                    type="checkbox"
+                                    id={`doc-${req.requirement_code}-${doc.id}`}
+                                    checked={selectedDocuments.has(`${req.requirement_code}-${doc.id}`)}
+                                    onChange={(e) => {
+                                      const key = `${req.requirement_code}-${doc.id}`;
+                                      if (e.target.checked) {
+                                        setSelectedDocuments(prev => new Set([...Array.from(prev), key]));
+                                        setEvidenceUploads(prev => ({
+                                          ...prev,
+                                          [req.requirement_code]: {
+                                            ...prev[req.requirement_code],
+                                            note: prev[req.requirement_code]?.note || `Linked from control: ${doc.filename}`
+                                          }
+                                        }));
+                                      } else {
+                                        setSelectedDocuments(prev => {
+                                          const updated = new Set(prev);
+                                          updated.delete(key);
+                                          return updated;
+                                        });
+                                      }
+                                    }}
+                                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                                  />
+                                  <label
+                                    htmlFor={`doc-${req.requirement_code}-${doc.id}`}
+                                    className="flex-1 cursor-pointer"
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-sm font-medium text-gray-900">{doc.filename}</span>
+                                      {doc.confidence && (
+                                        <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">
+                                          🤖 {Math.round(doc.confidence * 100)}% AI match
+                                        </span>
+                                      )}
+                                    </div>
+                                    {doc.reasoning && (
+                                      <p className="text-xs text-gray-600 mt-1">{doc.reasoning}</p>
+                                    )}
+                                  </label>
+                                </div>
+                                <a
+                                  href={doc.download_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-blue-600 hover:text-blue-800 text-xs"
+                                >
+                                  View
+                                </a>
+                              </div>
+                            ))}
+                          </div>
+                          <p className="text-xs text-gray-600 mt-1">
+                            💡 Select documents from the control to use as evidence, or upload new files below
+                          </p>
+                        </div>
+                      )}
+
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Upload Evidence File
+                          Upload New Evidence File
                         </label>
                         <input
                           type="file"
@@ -937,7 +1035,8 @@ export default function FillTemplatePage() {
                       </div>
                     </div>
                   </div>
-                ))}
+                );
+                })}
               </div>
             </div>
           </div>
@@ -949,12 +1048,9 @@ export default function FillTemplatePage() {
                 <div>
                   <h3 className="text-lg font-medium text-gray-900">Review and Submit</h3>
                   <p className="text-sm text-gray-600 mt-1">
-                    {hasAllValidationPassed() 
-                      ? "All validation requirements met. Ready to download or submit."
-                      : "AI validation must pass for all required evidence before downloading or submitting."
-                    }
+                    Download your policy document with filled company information, or submit with evidence for full compliance tracking.
                   </p>
-                  {!hasAllValidationPassed() && (
+                  {!areRequiredFieldsFilled() && (
                     <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded-md">
                       <div className="flex">
                         <div className="flex-shrink-0">
@@ -963,9 +1059,9 @@ export default function FillTemplatePage() {
                           </svg>
                         </div>
                         <div className="ml-3">
-                          <h4 className="text-sm font-medium text-yellow-800">Validation Required</h4>
+                          <h4 className="text-sm font-medium text-yellow-800">Required Fields</h4>
                           <p className="text-sm text-yellow-700 mt-1">
-                            Upload all required evidence and run AI validation to unlock download and submission features.
+                            Please fill in all required company information fields to download the policy document.
                           </p>
                         </div>
                       </div>
@@ -982,26 +1078,26 @@ export default function FillTemplatePage() {
                   {template && companyData.company_name && (
                     <button
                       onClick={() => downloadTemplateAsWord(template, companyData.company_name, companyData)}
-                      disabled={!hasAllValidationPassed()}
+                      disabled={!areRequiredFieldsFilled()}
                       className={`inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white ${
-                        hasAllValidationPassed()
+                        areRequiredFieldsFilled()
                           ? 'bg-purple-600 hover:bg-purple-700'
                           : 'bg-gray-400 cursor-not-allowed'
                       }`}
-                      title={hasAllValidationPassed() ? 'Download completed policy document' : 'AI validation required before download'}
+                      title={areRequiredFieldsFilled() ? 'Download policy document with your company information' : 'Fill in required company fields first'}
                     >
                       📄 Download Policy Word
                     </button>
                   )}
                   <button
                     onClick={submitTemplate}
-                    disabled={submitting || !hasAllValidationPassed()}
+                    disabled={submitting}
                     className={`inline-flex items-center px-6 py-2 border border-transparent text-sm font-medium rounded-md text-white ${
-                      submitting || !hasAllValidationPassed()
+                      submitting
                         ? 'bg-gray-400 cursor-not-allowed'
                         : 'bg-blue-600 hover:bg-blue-700'
                     }`}
-                    title={hasAllValidationPassed() ? 'Submit completed template' : 'AI validation required before submission'}
+                    title="Submit template with company information and evidence"
                   >
                     {submitting ? (
                       <>

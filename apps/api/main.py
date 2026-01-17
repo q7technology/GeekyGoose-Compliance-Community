@@ -2001,10 +2001,30 @@ async def list_controls(framework_id: str, db: Session = Depends(get_db)):
     
     return {"controls": result}
 
+def get_control_by_id_or_code(db: Session, control_identifier: str) -> Control:
+    """
+    Find a control by either UUID or code (case-insensitive).
+    Returns the control or None if not found.
+    """
+    from uuid import UUID
+
+    # Try to parse as UUID first
+    try:
+        uuid_obj = UUID(control_identifier)
+        control = db.query(Control).filter(Control.id == uuid_obj).first()
+        if control:
+            return control
+    except (ValueError, AttributeError):
+        pass
+
+    # Try as code (case-insensitive)
+    control = db.query(Control).filter(Control.code.ilike(control_identifier)).first()
+    return control
+
 @app.get("/controls/{control_id}")
 async def get_control_details(control_id: str, db: Session = Depends(get_db)):
     """Get detailed information about a specific control."""
-    control = db.query(Control).filter(Control.id == control_id).first()
+    control = get_control_by_id_or_code(db, control_id)
     if not control:
         raise HTTPException(status_code=404, detail="Control not found")
     
@@ -2090,11 +2110,16 @@ async def link_evidence_to_control(
 async def get_control_evidence(control_id: str, db: Session = Depends(get_db)):
     """Get all evidence linked to a control (both AI-linked and manual)."""
 
+    # Find the control by ID or code
+    control = get_control_by_id_or_code(db, control_id)
+    if not control:
+        raise HTTPException(status_code=404, detail="Control not found")
+
     result = []
 
     # Get AI-linked evidence (DocumentControlLink)
     ai_links = db.query(DocumentControlLink).filter(
-        DocumentControlLink.control_id == control_id
+        DocumentControlLink.control_id == control.id
     ).all()
 
     for link in ai_links:
@@ -2118,7 +2143,7 @@ async def get_control_evidence(control_id: str, db: Session = Depends(get_db)):
 
     # Get manually linked evidence (EvidenceLink)
     manual_links = db.query(EvidenceLink).filter(
-        EvidenceLink.control_id == control_id
+        EvidenceLink.control_id == control.id
     ).all()
 
     for link in manual_links:
@@ -2150,12 +2175,12 @@ async def get_control_evidence(control_id: str, db: Session = Depends(get_db)):
 async def get_control_documents(control_id: str, db: Session = Depends(get_db)):
     """Get all documents linked to a specific control via AI analysis."""
     try:
-        control = db.query(Control).filter(Control.id == control_id).first()
+        control = get_control_by_id_or_code(db, control_id)
         if not control:
             raise HTTPException(status_code=404, detail="Control not found")
-        
+
         # Get all document links for this control
-        links = db.query(DocumentControlLink).filter(DocumentControlLink.control_id == control_id).all()
+        links = db.query(DocumentControlLink).filter(DocumentControlLink.control_id == control.id).all()
         
         documents = []
         for link in links:
@@ -2217,25 +2242,25 @@ async def create_scan(
     db: Session = Depends(get_db)
 ):
     """Create a new compliance scan for a control."""
-    
+
     # Verify control exists
-    control = db.query(Control).filter(Control.id == control_id).first()
+    control = get_control_by_id_or_code(db, control_id)
     if not control:
         raise HTTPException(status_code=404, detail="Control not found")
-    
+
     # For demo, get default org
     org = db.query(Org).first()
     if not org:
         raise HTTPException(status_code=400, detail="No organization found")
-    
+
     # Check if there's evidence linked to this control (manual OR AI-linked)
     manual_evidence_count = db.query(EvidenceLink).filter(
-        EvidenceLink.control_id == control_id,
+        EvidenceLink.control_id == control.id,
         EvidenceLink.org_id == org.id
     ).count()
 
     ai_evidence_count = db.query(DocumentControlLink).filter(
-        DocumentControlLink.control_id == control_id
+        DocumentControlLink.control_id == control.id
     ).count()
 
     total_evidence = manual_evidence_count + ai_evidence_count
@@ -2245,11 +2270,11 @@ async def create_scan(
             status_code=400,
             detail="No evidence linked to this control. Please upload and link evidence documents first."
         )
-    
+
     # Create scan record
     scan = Scan(
         org_id=org.id,
-        control_id=control_id,
+        control_id=control.id,
         status='pending'
     )
     
@@ -2326,9 +2351,14 @@ async def get_scan_status(scan_id: str, db: Session = Depends(get_db)):
 @app.get("/controls/{control_id}/scans")
 async def get_control_scans(control_id: str, db: Session = Depends(get_db)):
     """Get all scans for a control."""
-    
+
+    # Find the control by ID or code
+    control = get_control_by_id_or_code(db, control_id)
+    if not control:
+        raise HTTPException(status_code=404, detail="Control not found")
+
     scans = db.query(Scan).filter(
-        Scan.control_id == control_id
+        Scan.control_id == control.id
     ).order_by(Scan.created_at.desc()).all()
     
     return {
@@ -2422,28 +2452,27 @@ async def save_ai_settings(settings_request: AISettingsRequest, db: Session = De
 
     # Update dual vision validation setting
     if settings_request.use_dual_vision_validation is not None:
-        settings.use_dual_vision_validation = 1 if settings_request.use_dual_vision_validation else 0
+        settings.use_dual_vision_validation = bool(settings_request.use_dual_vision_validation)
 
-    if settings_request.provider == "openai":
-        if settings_request.openai_api_key and settings_request.openai_api_key != "***":
-            settings.openai_api_key = settings_request.openai_api_key
-        if settings_request.openai_model:
-            settings.openai_model = settings_request.openai_model
-        if settings_request.openai_vision_model:
-            settings.openai_vision_model = settings_request.openai_vision_model
-        if settings_request.openai_endpoint:
-            settings.openai_endpoint = settings_request.openai_endpoint
-        else:
-            settings.openai_endpoint = None
-    elif settings_request.provider == "ollama":
-        if settings_request.ollama_endpoint:
-            settings.ollama_endpoint = settings_request.ollama_endpoint
-        if settings_request.ollama_model:
-            settings.ollama_model = settings_request.ollama_model
-        if settings_request.ollama_vision_model:
-            settings.ollama_vision_model = settings_request.ollama_vision_model
-        if settings_request.ollama_context_size is not None:
-            settings.ollama_context_size = settings_request.ollama_context_size
+    # Update OpenAI settings (allow even when provider is Ollama, for dual validation)
+    if settings_request.openai_api_key and settings_request.openai_api_key != "***":
+        settings.openai_api_key = settings_request.openai_api_key
+    if settings_request.openai_model:
+        settings.openai_model = settings_request.openai_model
+    if settings_request.openai_vision_model:
+        settings.openai_vision_model = settings_request.openai_vision_model
+    if settings_request.openai_endpoint is not None:
+        settings.openai_endpoint = settings_request.openai_endpoint if settings_request.openai_endpoint else None
+
+    # Update Ollama settings (allow even when provider is OpenAI, for dual validation)
+    if settings_request.ollama_endpoint:
+        settings.ollama_endpoint = settings_request.ollama_endpoint
+    if settings_request.ollama_model:
+        settings.ollama_model = settings_request.ollama_model
+    if settings_request.ollama_vision_model:
+        settings.ollama_vision_model = settings_request.ollama_vision_model
+    if settings_request.ollama_context_size is not None:
+        settings.ollama_context_size = settings_request.ollama_context_size
 
     db.commit()
     db.refresh(settings)
@@ -2805,7 +2834,7 @@ async def get_control_details(control_id: str):
     """Get detailed information about a specific control including requirements."""
     db = SessionLocal()
     try:
-        control = db.query(Control).filter(Control.id == control_id).first()
+        control = get_control_by_id_or_code(db, control_id)
         if not control:
             raise HTTPException(status_code=404, detail="Control not found")
         
@@ -2838,8 +2867,13 @@ async def get_control_scans(control_id: str):
     """Get all scans for a specific control."""
     db = SessionLocal()
     try:
+        # Find the control by ID or code
+        control = get_control_by_id_or_code(db, control_id)
+        if not control:
+            raise HTTPException(status_code=404, detail="Control not found")
+
         scans = db.query(Scan).filter(
-            Scan.control_id == control_id
+            Scan.control_id == control.id
         ).order_by(Scan.created_at.desc()).all()
         
         scan_list = []

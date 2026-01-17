@@ -93,7 +93,7 @@ export default function Sidebar() {
               Essential Eight Compliance
             </div>
             <div className="text-xs text-gray-500">
-              Version 0.3.0
+              Version 0.3.1
             </div>
           </div>
         </div>

@@ -184,9 +184,33 @@ export default function ControlDetailPage() {
           'Content-Type': 'application/json',
         },
       });
-      
+
       if (response.ok) {
         const data = await response.json();
+
+        // Add scan to global running scans tracker
+        const runningScan = {
+          id: data.scan_id,
+          control: {
+            id: control?.id || controlId,
+            code: control?.code || 'Unknown',
+            title: control?.title || 'Unknown Control',
+          },
+          status: 'running',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+
+        // Get existing running scans from localStorage
+        const storedScans = localStorage.getItem('running_scans');
+        const runningScans = storedScans ? JSON.parse(storedScans) : [];
+
+        // Add new scan if not already in the list
+        if (!runningScans.find((s: any) => s.id === data.scan_id)) {
+          runningScans.push(runningScan);
+          localStorage.setItem('running_scans', JSON.stringify(runningScans));
+        }
+
         alert(`Scan started successfully! Scan ID: ${data.scan_id}`);
         // Refresh scans list
         fetchScans();

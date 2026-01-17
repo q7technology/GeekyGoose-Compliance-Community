@@ -382,6 +382,24 @@ export default function SettingsPage() {
                     Custom OpenAI API endpoint. Leave empty to use the default OpenAI endpoint. Useful for proxies or OpenAI-compatible services.
                   </p>
                 </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Vision Model (for images & PDFs)
+                  </label>
+                  <select
+                    value={settings.openai_vision_model || 'gpt-4o'}
+                    onChange={(e) => setSettings({ ...settings, openai_vision_model: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  >
+                    <option value="gpt-4o">GPT-4o (Recommended)</option>
+                    <option value="gpt-4o-mini">GPT-4o Mini</option>
+                    <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    GPT-4o offers the best vision capabilities for analyzing images and PDF documents
+                  </p>
+                </div>
               </div>
             )}
 
@@ -463,6 +481,46 @@ export default function SettingsPage() {
                       </p>
                     )}
                   </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Vision Model (for images & PDFs)
+                  </label>
+                  {ollamaModels.length > 0 ? (
+                    <select
+                      value={settings.ollama_vision_model || 'qwen2-vl'}
+                      onChange={(e) => setSettings({ ...settings, ollama_vision_model: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="qwen2-vl">Qwen2-VL (Recommended)</option>
+                      {ollamaModels.map((model, index) => (
+                        <option key={index} value={model.name}>
+                          {model.display_name} ({model.family}) - {model.size_gb}GB
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <select
+                      value={settings.ollama_vision_model || 'qwen2-vl'}
+                      onChange={(e) => setSettings({ ...settings, ollama_vision_model: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >
+                      <option value="qwen2-vl">Qwen2-VL (Recommended)</option>
+                      <option value="llava">LLaVA</option>
+                      <option value="llava:13b">LLaVA 13B</option>
+                      <option value="llava:34b">LLaVA 34B</option>
+                      <option value="bakllava">BakLLaVA</option>
+                      <option value="granite3.2-vision:2b">Granite 3.2 Vision 2B</option>
+                    </select>
+                  )}
+                  <p className="text-xs text-gray-500 mt-1">
+                    {ollamaModels.length > 0 ? (
+                      <>Vision-capable model for analyzing images and PDF documents. Used for dual validation when enabled.</>
+                    ) : (
+                      <>Install with: <code className="bg-gray-100 px-1 rounded">ollama pull qwen2-vl</code> or <code className="bg-gray-100 px-1 rounded">ollama pull llava</code></>
+                    )}
+                  </p>
                 </div>
 
                 <div>
@@ -558,7 +616,7 @@ export default function SettingsPage() {
                     <label htmlFor="dual-vision" className="cursor-pointer">
                       <span className="font-medium text-gray-900">🔬 Dual Vision Validation (Ultra Accuracy)</span>
                       <p className="text-sm text-gray-600 mt-1">
-                        Use <strong>both</strong> GPT-4o AND Qwen2-VL together. Only creates links if <strong>both models agree</strong> on the same control. Uses minimum confidence from both models.
+                        Use <strong>both</strong> OpenAI vision model ({settings.openai_vision_model || 'gpt-4o'}) AND Ollama vision model ({settings.ollama_vision_model || 'qwen2-vl'}) together. Only creates links if <strong>both models agree</strong> on the same control. Uses minimum confidence from both models.
                       </p>
                       <div className="mt-2 text-xs space-y-1">
                         <div className="flex items-center gap-2">
@@ -575,24 +633,15 @@ export default function SettingsPage() {
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-orange-500">⚠</span>
-                          <span className="text-gray-700">Requires both OpenAI API key AND Ollama with qwen2-vl model</span>
+                          <span className="text-gray-700">Requires both OpenAI API key AND Ollama with vision model</span>
                         </div>
                       </div>
+                      <p className="text-xs text-purple-700 mt-2 bg-purple-50 p-2 rounded">
+                        💡 Configure vision models above in the OpenAI and Ollama sections
+                      </p>
                     </label>
                   </div>
                 </div>
-              </div>
-
-              {/* Vision Model Info */}
-              <div className="text-xs text-gray-600 p-3 bg-blue-50 rounded border border-blue-200">
-                <p className="font-medium text-blue-900 mb-1">📸 Vision Models Used:</p>
-                <ul className="space-y-1 ml-4 list-disc">
-                  <li><strong>OpenAI:</strong> {settings.openai_vision_model || 'gpt-4o'} (for images & PDFs)</li>
-                  <li><strong>Ollama:</strong> {settings.ollama_vision_model || 'qwen2-vl'} (for dual validation)</li>
-                </ul>
-                <p className="mt-2 text-blue-800">
-                  💡 To use dual validation, install: <code className="bg-blue-100 px-1 rounded">ollama pull qwen2-vl</code>
-                </p>
               </div>
             </div>
 

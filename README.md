@@ -3,7 +3,7 @@
 > **Get Compliant Fast** - Enterprise-Grade AI-Powered Compliance Automation Platform
 
 ![License](https://img.shields.io/badge/license-AGPLv3-blue.svg)
-![Version](https://img.shields.io/badge/version-0.3.0-green.svg)
+![Version](https://img.shields.io/badge/version-0.3.1-green.svg)
 ![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?logo=typescript&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-16.1.1-black?logo=next.js&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
@@ -36,12 +36,14 @@
 
 ### 🤖 **AI-Powered Compliance Scanning**
 - **Two-Step Document Analysis**: First scan and summarize, then map to controls
+- **Dual Vision Validation**: Use both OpenAI and Ollama vision models together for ultra-accurate document analysis
 - **Structured Output Processing**: Reliable AI responses with fallback handling
 - **Automated Evidence Analysis**: Upload policies, screenshots, and documents
 - **Smart Gap Detection**: AI identifies what's missing and why
 - **Compliance Scoring**: Pass/Partial/Fail ratings with confidence levels
 - **Citation Tracking**: Direct references to evidence supporting each finding
 - **Model Transparency**: Scan results display which AI model performed the analysis (Ollama/OpenAI)
+- **Vision Model Support**: Separate text and vision models for optimal analysis of different content types
 
 ### 📊 **Comprehensive Reporting**
 - **Executive Dashboards**: High-level compliance overview with visual metrics
@@ -328,7 +330,7 @@ NEXT_PUBLIC_API_URL=https://api.yourdomain.com
 # docker-compose.prod.yml example with monitoring
 services:
   api:
-    image: geekygoose/api:0.3.0
+    image: geekygoose/api:0.3.1
     environment:
       - NODE_ENV=production
     deploy:
@@ -425,14 +427,20 @@ docker-compose exec api alembic upgrade head
 # Install Ollama locally
 curl -fsSL https://ollama.com/install.sh | sh
 
-# Pull recommended models for 16GB+ RAM systems
+# Pull recommended models for text analysis (16GB+ RAM systems)
 ollama pull qwen2.5:14b          # Best for comprehensive analysis (16GB+ RAM)
 ollama pull llama3.1:8b          # Good balance of speed and quality
 ollama pull mistral:7b           # Fast and efficient
 
+# Pull vision models for image/PDF analysis
+ollama pull qwen2-vl             # Recommended vision model for dual validation
+ollama pull llava                # Alternative vision model
+ollama pull granite3.2-vision:2b # Lightweight vision model (2GB RAM)
+
 # Configure in .env
 OLLAMA_ENDPOINT=http://localhost:11434
-OLLAMA_MODEL=qwen2.5:14b         # Large model with 32K context window
+OLLAMA_MODEL=qwen2.5:14b         # Text/logic model with 32K context window
+OLLAMA_VISION_MODEL=qwen2-vl     # Vision model for images and PDFs
 OLLAMA_CONTEXT_SIZE=32768        # Maximize context for comprehensive analysis
 AI_PROVIDER=ollama
 
@@ -451,9 +459,54 @@ AI_PROVIDER=ollama
 ```bash
 # Configure in .env
 OPENAI_API_KEY=sk-your-key-here
-OPENAI_MODEL=gpt-4o-mini
+OPENAI_MODEL=gpt-4o-mini         # Text/logic model
+OPENAI_VISION_MODEL=gpt-4o       # Vision model for images and PDFs
 AI_PROVIDER=openai
 ```
+
+### **🔬 Dual Vision Validation (Ultra Accuracy Mode)**
+
+For maximum accuracy on critical compliance documents, enable **Dual Vision Validation** in the Settings page. This feature uses **both OpenAI and Ollama vision models** to analyze the same document independently.
+
+**How it works:**
+1. Both OpenAI vision model (e.g., `gpt-4o`) AND Ollama vision model (e.g., `qwen2-vl`) analyze the document
+2. A control link is created **only if both models agree** on the same control
+3. The system uses the **minimum confidence** from both models
+4. Both models must independently identify the same control for validation
+
+**Benefits:**
+- ✅ **Virtually eliminates false positives** - two independent AI models validate each other
+- ✅ **Maximum accuracy** for critical compliance documents
+- ✅ **Independent verification** - different AI architectures cross-check results
+- ✅ **Confidence in results** - dual validation provides higher assurance
+
+**Trade-offs:**
+- ⚠️ **2x processing time** - documents are analyzed twice
+- ⚠️ **Higher cost** - requires both OpenAI API credits and Ollama resources
+- ⚠️ **Requires both services** - must have OpenAI API key AND Ollama running
+
+**Configuration in Settings:**
+```
+✅ Enable "Dual Vision Validation (Ultra Accuracy)"
+
+OpenAI Section:
+- Vision Model: gpt-4o (recommended)
+
+Ollama Section:
+- Vision Model: qwen2-vl (recommended)
+```
+
+**When to use:**
+- Critical compliance documents requiring highest accuracy
+- Regulatory submissions and audits
+- High-risk controls where errors are costly
+- Final validation before official compliance reports
+
+**When not to use:**
+- Initial document analysis and exploration
+- Large batches of documents (due to 2x time)
+- Budget-constrained scenarios
+- Development and testing environments
 
 ## 📋 Supported Compliance Frameworks
 
@@ -715,6 +768,54 @@ curl https://yourdomain.com/health
 - **SLA Support**: As-IS
 
 ## 📅 Changelog
+
+### **v0.3.1** - Dual Vision Validation & Enhanced AI Configuration (January 2026)
+
+#### 🔬 **Dual Vision Validation**
+- **Ultra Accuracy Mode**: Use both OpenAI and Ollama vision models together
+  - **Independent Analysis**: Both models analyze the same document separately
+  - **Consensus Required**: Links created only when both models agree on the same control
+  - **Minimum Confidence**: Uses the lowest confidence score from both models
+  - **Maximum Accuracy**: Virtually eliminates false positives for critical documents
+
+#### 🤖 **Enhanced AI Model Configuration**
+- **Separate Vision Models**: Configure distinct vision models for OpenAI and Ollama
+  - **OpenAI Vision**: Select from GPT-4o, GPT-4o Mini, or GPT-4 Turbo for image/PDF analysis
+  - **Ollama Vision**: Choose from your installed models (qwen2-vl, llava, granite3.2-vision, etc.)
+  - **Text vs Vision**: Different models optimized for text analysis vs visual content
+  - **Model Detection**: Auto-populate available models from your Ollama instance
+
+- **Improved Settings UI**: Reorganized settings page for better clarity
+  - **Provider-Specific Sections**: Vision models now grouped under their respective providers
+  - **Real-time Model List**: Refresh button to fetch latest available Ollama models
+  - **Model Transparency**: Dual validation section shows which models will be used
+  - **Dynamic Configuration**: Vision model settings save for both providers regardless of active provider
+
+#### 🔧 **API & Backend Improvements**
+- **Smart Control Lookup**: Support both UUID and control code (case-insensitive)
+  - **Flexible Endpoints**: All `/controls/{control_id}` endpoints accept UUIDs or codes
+  - **Case-Insensitive**: Works with `ee-7`, `EE-7`, or `7075c1f5-9899-4817-8963-57a8db86e625`
+  - **Helper Function**: Centralized `get_control_by_id_or_code()` for consistent lookup
+  - **8 Endpoints Fixed**: All control-related endpoints now support flexible identification
+
+- **Database Type Fixes**: Corrected boolean handling for PostgreSQL
+  - **Boolean Conversion**: Fixed `use_dual_vision_validation` integer to boolean conversion
+  - **Type Safety**: Proper Python `bool()` conversion instead of 1/0 integers
+  - **Settings Persistence**: Both provider settings now save regardless of active provider
+
+#### 🐛 **Bug Fixes**
+- Fixed database type mismatch error for `use_dual_vision_validation` field
+- Resolved 404 errors when accessing controls by code (e.g., `ee-7`)
+- Fixed control lookup to handle both lowercase and uppercase codes
+- Corrected vision model settings not saving when switching providers
+- Fixed UUID vs code routing issues in template filling page
+
+#### 🎨 **UI/UX Enhancements**
+- Vision model selectors moved to their respective provider sections
+- Dual validation toggle shows currently configured models
+- Better visual organization of advanced AI settings
+- Helpful tooltips explaining when to use dual validation
+- Clear indication of trade-offs (2x time, higher cost)
 
 ### **v0.3.0** - Enterprise Security & Performance Overhaul (December 2025)
 
